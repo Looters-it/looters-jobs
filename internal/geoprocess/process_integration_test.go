@@ -14,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gioco/jobs/internal/config"
-	"gioco/jobs/internal/geoprocess"
+	"looters/jobs/internal/config"
+	"looters/jobs/internal/geoprocess"
 )
 
 const milanFile = "../geo/testdata/milano-comuni.geojson"

@@ -18,7 +18,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.PollInterval != time.Second || cfg.Workers != 4 || cfg.MaxAttempts != 5 || cfg.StaleAfter != 5*time.Minute {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
-	if len(cfg.KafkaBrokers) != 2 || cfg.KafkaBrokers[1] != "k2:9092" || cfg.KafkaBattleTopic != "battle.resolve" || cfg.KafkaGroup != "gioco-jobs" {
+	if len(cfg.KafkaBrokers) != 2 || cfg.KafkaBrokers[1] != "k2:9092" || cfg.KafkaBattleTopic != "battle.resolve" || cfg.KafkaGroup != "looters-jobs" {
 		t.Fatalf("unexpected kafka defaults: %+v", cfg)
 	}
 }

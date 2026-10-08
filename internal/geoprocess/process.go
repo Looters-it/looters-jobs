@@ -15,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gioco/jobs/internal/config"
-	"gioco/jobs/internal/geo"
+	"looters/jobs/internal/config"
+	"looters/jobs/internal/geo"
 )
 
 // metresPerDegree converts the configured distances to degrees. It is the

@@ -11,15 +11,15 @@ import (
 	"sync"
 	"syscall"
 
-	"gioco/jobs/internal/battle"
-	"gioco/jobs/internal/battlequeue"
-	"gioco/jobs/internal/config"
-	"gioco/jobs/internal/db"
-	"gioco/jobs/internal/geoprocess"
-	"gioco/jobs/internal/handlers"
-	"gioco/jobs/internal/matchstart"
-	"gioco/jobs/internal/queue"
-	"gioco/jobs/internal/turnclose"
+	"looters/jobs/internal/battle"
+	"looters/jobs/internal/battlequeue"
+	"looters/jobs/internal/config"
+	"looters/jobs/internal/db"
+	"looters/jobs/internal/geoprocess"
+	"looters/jobs/internal/handlers"
+	"looters/jobs/internal/matchstart"
+	"looters/jobs/internal/queue"
+	"looters/jobs/internal/turnclose"
 )
 
 func main() {

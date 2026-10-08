@@ -59,7 +59,7 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("KAFKA_BROKERS is required")
 	}
 	cfg.KafkaBattleTopic = orDefault(getenv("KAFKA_BATTLE_TOPIC"), "battle.resolve")
-	cfg.KafkaGroup = orDefault(getenv("KAFKA_GROUP_ID"), "gioco-jobs")
+	cfg.KafkaGroup = orDefault(getenv("KAFKA_GROUP_ID"), "looters-jobs")
 
 	var err error
 	if cfg.Geo.SimplifyToleranceM, err = positiveFloat(getenv, "GEO_SIMPLIFY_TOLERANCE_M", 50); err != nil {

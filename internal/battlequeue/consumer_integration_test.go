@@ -15,7 +15,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"gioco/jobs/internal/battlequeue"
+	"looters/jobs/internal/battlequeue"
 )
 
 // Needs a running broker: set TEST_KAFKA_BROKERS (see .env.example).

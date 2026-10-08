@@ -1,4 +1,4 @@
-module gioco/jobs
+module looters/jobs
 
 go 1.26.1
 

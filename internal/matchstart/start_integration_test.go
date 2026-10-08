@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gioco/jobs/internal/matchstart"
+	"looters/jobs/internal/matchstart"
 )
 
 // These tests need a database migrated by the api: set TEST_DATABASE_URL (see .env.example).

@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gioco/jobs/internal/queue"
-	"gioco/jobs/internal/rules"
-	"gioco/jobs/internal/turnclose"
+	"looters/jobs/internal/queue"
+	"looters/jobs/internal/rules"
+	"looters/jobs/internal/turnclose"
 )
 
 // Outcome says what a start job found.

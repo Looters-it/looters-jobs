@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"gioco/jobs/internal/battle"
-	"gioco/jobs/internal/battlequeue"
-	"gioco/jobs/internal/geoprocess"
-	"gioco/jobs/internal/matchstart"
-	"gioco/jobs/internal/queue"
-	"gioco/jobs/internal/turnclose"
+	"looters/jobs/internal/battle"
+	"looters/jobs/internal/battlequeue"
+	"looters/jobs/internal/geoprocess"
+	"looters/jobs/internal/matchstart"
+	"looters/jobs/internal/queue"
+	"looters/jobs/internal/turnclose"
 )
 
 // Job types.

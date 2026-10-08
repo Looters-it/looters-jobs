@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gioco/jobs/internal/handlers"
-	"gioco/jobs/internal/queue"
+	"looters/jobs/internal/handlers"
+	"looters/jobs/internal/queue"
 )
 
 // These tests need a database migrated by the api: set TEST_DATABASE_URL (see .env.example).

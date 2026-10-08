@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gioco/jobs/internal/endgame"
-	"gioco/jobs/internal/queue"
-	"gioco/jobs/internal/rules"
+	"looters/jobs/internal/endgame"
+	"looters/jobs/internal/queue"
+	"looters/jobs/internal/rules"
 )
 
 // Outcomes, as stored in Battle.outcome.

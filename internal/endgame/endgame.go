@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"gioco/jobs/internal/queue"
+	"looters/jobs/internal/queue"
 )
 
 const utcNow = `(now() AT TIME ZONE 'UTC')`
