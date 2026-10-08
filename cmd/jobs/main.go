@@ -18,6 +18,7 @@ import (
 	"gioco/jobs/internal/handlers"
 	"gioco/jobs/internal/matchstart"
 	"gioco/jobs/internal/queue"
+	"gioco/jobs/internal/turnclose"
 )
 
 func main() {
@@ -53,6 +54,7 @@ func run(log *slog.Logger) error {
 		Handlers: handlers.All(pool,
 			&geoprocess.Processor{Pool: pool, UploadDir: cfg.UploadDir, Geo: cfg.Geo, Log: log},
 			&matchstart.Starter{Pool: pool, Log: log},
+			&turnclose.Closer{Pool: pool, Log: log},
 		),
 		Workers:      cfg.Workers,
 		MaxAttempts:  cfg.MaxAttempts,

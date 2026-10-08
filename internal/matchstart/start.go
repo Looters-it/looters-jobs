@@ -13,6 +13,7 @@ import (
 
 	"gioco/jobs/internal/queue"
 	"gioco/jobs/internal/rules"
+	"gioco/jobs/internal/turnclose"
 )
 
 // Outcome says what a start job found.
@@ -105,6 +106,10 @@ func (s *Starter) Start(ctx context.Context, matchID string) (Outcome, error) {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO "GameEvent" (id, "matchId", turn, type, data) VALUES ('ev_' || gen_random_uuid(), $1, 1, 'MATCH_STARTED', '{}')`,
 		matchID); err != nil {
+		return "", err
+	}
+	// The first turn closes by itself when it ends.
+	if err := turnclose.Schedule(ctx, tx, matchID, 1, turnEndsAt); err != nil {
 		return "", err
 	}
 	// Sent only if the transaction commits.

@@ -12,24 +12,42 @@ import (
 	"gioco/jobs/internal/geoprocess"
 	"gioco/jobs/internal/matchstart"
 	"gioco/jobs/internal/queue"
+	"gioco/jobs/internal/turnclose"
 )
 
-// Job types. turn.close arrives with a later milestone.
+// Job types.
 const (
 	TypePing       = "system.ping"
 	TypeGeoProcess = "geo.process"
 	TypeMatchStart = "match.start"
+	TypeTurnClose  = "turn.close"
 )
 
 // KindPong is the notification sent in reply to a ping.
 const KindPong = "system.pong"
 
 // All returns the handlers for every job type this service knows.
-func All(db queue.Querier, geo *geoprocess.Processor, starter *matchstart.Starter) map[string]queue.Handler {
+func All(db queue.Querier, geo *geoprocess.Processor, starter *matchstart.Starter, closer *turnclose.Closer) map[string]queue.Handler {
 	return map[string]queue.Handler{
 		TypePing:       Ping(db),
 		TypeGeoProcess: GeoProcess(geo),
 		TypeMatchStart: MatchStart(starter),
+		TypeTurnClose:  TurnClose(closer),
+	}
+}
+
+// TurnClose closes a turn that has reached its end.
+func TurnClose(closer *turnclose.Closer) queue.Handler {
+	return func(ctx context.Context, job queue.Job) error {
+		var payload struct {
+			MatchID string `json:"matchId"`
+			Turn    int    `json:"turn"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.MatchID == "" || payload.Turn < 1 {
+			return fmt.Errorf("%w: invalid turn.close payload %s", queue.ErrPermanent, job.Payload)
+		}
+		_, err := closer.Close(ctx, payload.MatchID, payload.Turn)
+		return err
 	}
 }
 
