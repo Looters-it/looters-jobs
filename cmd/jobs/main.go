@@ -23,7 +23,12 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// LOG_LEVEL: debug, info (the default), warn or error.
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(os.Getenv("LOG_LEVEL"))); err != nil {
+		level = slog.LevelInfo
+	}
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	if err := run(log); err != nil {
 		log.Error("jobs stopped", "err", err)
 		os.Exit(1)
