@@ -149,8 +149,12 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 	if attackerWins {
 		// The winner takes the territory with whatever is left on it. Just acquired, it
 		// can receive resources at once and cannot be attacked until the protection ends.
+		// In the proportional split of the income it weighs like the average of the
+		// territories the winner already has, so that it gets a share like theirs.
 		if _, err := tx.Exec(ctx, `
-			UPDATE "Territory" SET "ownerEmpireId" = $2, "protectedUntilTurn" = $3, weight = 1,
+			UPDATE "Territory" t SET "ownerEmpireId" = $2, "protectedUntilTurn" = $3,
+				weight = coalesce((SELECT greatest(1, round(avg(o.weight)))::int FROM "Territory" o
+					WHERE o."ownerEmpireId" = $2 AND o.id <> t.id), 1),
 				"aboveAlertAtLastClose" = false, alert = false
 			WHERE id = $1`, targetID, attackerID, protectedUntilTurn); err != nil {
 			return false, err

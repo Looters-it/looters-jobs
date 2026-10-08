@@ -160,11 +160,11 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 
 	// A match with a maximum duration ends at the first turn close on or after its deadline.
 	if deadline := endgame.Deadline(asUTC(startAt), maxDays); deadline != nil && !endsAt.Before(*deadline) {
-		winner, err := endgame.WinnerAtDeadline(ctx, tx, matchID)
+		winners, err := endgame.WinnersAtDeadline(ctx, tx, matchID)
 		if err != nil {
 			return "", err
 		}
-		if err := endgame.Finish(ctx, tx, matchID, winner, turn); err != nil {
+		if err := endgame.Finish(ctx, tx, matchID, winners, turn); err != nil {
 			return "", err
 		}
 		if err := tx.Commit(ctx); err != nil {

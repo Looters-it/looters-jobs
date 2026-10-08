@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -380,5 +381,30 @@ func TestAllianceExitsTakeEffectAtTheCloseOfTheirTurn(t *testing.T) {
 	}
 	if got := f.count(`SELECT count(*) FROM "Alliance" WHERE "dissolvedAt" IS NOT NULL`); got != 1 {
 		t.Errorf("the alliance was not dissolved")
+	}
+}
+
+func TestEmpiresExactlyLevelAtTheDeadlineWinTogether(t *testing.T) {
+	f := setup(t)
+	f.exec(`UPDATE "Match" SET "maxDays" = 1 WHERE id = 'm1'`)
+	// One municipality each and the same resources: nothing tells them apart.
+	f.exec(`DELETE FROM "TerritoryUnit" WHERE "territoryId" = 'A2'`)
+	f.exec(`DELETE FROM "Territory" WHERE id = 'A2'`)
+	f.exec(`UPDATE "Territory" SET resources = 50, weight = 1 WHERE id IN ('A1', 'B1')`)
+	if got := f.close(3); got != turnclose.Finished {
+		t.Fatalf("outcome = %s", got)
+	}
+	var winners []string
+	var data string
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT m."winnerEmpireIds", (SELECT e.data::text FROM "GameEvent" e WHERE e.type = 'MATCH_FINISHED')
+		FROM "Match" m WHERE m.id = 'm1'`).Scan(&winners, &data); err != nil {
+		t.Fatal(err)
+	}
+	if len(winners) != 2 || winners[0] != "anna" || winners[1] != "bruno" {
+		t.Errorf("winners = %v, want anna and bruno", winners)
+	}
+	if !strings.Contains(data, `"result": "TIE"`) || !strings.Contains(data, `"winnerName": "Anna, Bruno"`) {
+		t.Errorf("event data: %s", data)
 	}
 }

@@ -575,3 +575,7 @@ DROP TYPE "GeoAreaKind";
 -- 20261008093711_battle_cancelled
 -- AlterEnum
 ALTER TYPE "BattleOutcome" ADD VALUE 'CANCELLED';
+
+-- 20261008161102_match_winners
+-- AlterTable
+ALTER TABLE "Match" ADD COLUMN     "winnerEmpireIds" TEXT[] DEFAULT ARRAY[]::TEXT[];

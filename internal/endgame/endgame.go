@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -140,7 +141,7 @@ func finishIfOneLeft(ctx context.Context, tx pgx.Tx, matchID string, turn int) (
 	if len(active) != 1 {
 		return false, nil
 	}
-	return true, Finish(ctx, tx, matchID, &active[0], turn)
+	return true, Finish(ctx, tx, matchID, active, turn)
 }
 
 // Deadline is the moment a match with a maximum duration ends, or nil.
@@ -152,33 +153,39 @@ func Deadline(startAt time.Time, maxDays *int) *time.Time {
 	return &deadline
 }
 
-// WinnerAtDeadline picks the winner of a match that reached its maximum
+// WinnersAtDeadline picks who wins a match that reached its maximum
 // duration: the active empire with the most resources; with equal resources
-// the one that controls more municipalities; if still equal, the one that
-// joined first, so that the result is always a single empire.
-func WinnerAtDeadline(ctx context.Context, tx pgx.Tx, matchID string) (*string, error) {
-	var winner string
-	err := tx.QueryRow(ctx, `
-		SELECT e.id
-		FROM "Empire" e
-		LEFT JOIN "Territory" t ON t."ownerEmpireId" = e.id
-		LEFT JOIN LATERAL (SELECT count(*) AS n FROM "TerritoryUnit" tu WHERE tu."territoryId" = t.id) units ON true
-		WHERE e."matchId" = $1 AND e.status = 'ACTIVE'
-		GROUP BY e.id, e."joinedAt"
-		ORDER BY coalesce(sum(t.resources), 0) DESC, coalesce(sum(units.n), 0) DESC, e."joinedAt", e.id
-		LIMIT 1`, matchID).Scan(&winner)
-	if err == pgx.ErrNoRows {
-		return nil, nil
-	}
+// the one that controls more municipalities. Empires level on both win
+// together: there is nothing left to tell them apart.
+func WinnersAtDeadline(ctx context.Context, tx pgx.Tx, matchID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		WITH standing AS (
+			SELECT e.id, e."joinedAt", coalesce(sum(t.resources), 0) AS resources, coalesce(sum(units.n), 0) AS units
+			FROM "Empire" e
+			LEFT JOIN "Territory" t ON t."ownerEmpireId" = e.id
+			LEFT JOIN LATERAL (SELECT count(*) AS n FROM "TerritoryUnit" tu WHERE tu."territoryId" = t.id) units ON true
+			WHERE e."matchId" = $1 AND e.status = 'ACTIVE'
+			GROUP BY e.id, e."joinedAt"
+		)
+		SELECT id FROM standing
+		WHERE (resources, units) = (SELECT resources, units FROM standing ORDER BY resources DESC, units DESC LIMIT 1)
+		ORDER BY "joinedAt", id`, matchID)
 	if err != nil {
 		return nil, err
 	}
-	return &winner, nil
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // Finish ends a match. Battles still open are cancelled like those of a
 // fallen empire, so that nothing stays locked in a finished match.
-func Finish(ctx context.Context, tx pgx.Tx, matchID string, winnerID *string, turn int) error {
+func Finish(ctx context.Context, tx pgx.Tx, matchID string, winnerIDs []string, turn int) error {
+	var winnerID *string
+	if len(winnerIDs) > 0 {
+		winnerID = &winnerIDs[0]
+	}
+	if winnerIDs == nil {
+		winnerIDs = []string{}
+	}
 	const open = `SELECT id FROM "Battle" WHERE "matchId" = $1 AND status = 'OPEN'`
 	if _, err := tx.Exec(ctx, `
 		UPDATE "Territory" t SET resources = t.resources + src.cost
@@ -194,8 +201,8 @@ func Finish(ctx context.Context, tx pgx.Tx, matchID string, winnerID *string, tu
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE "Match" SET status = 'FINISHED', "finishedAt" = `+utcNow+`, "winnerEmpireId" = $2 WHERE id = $1`,
-		matchID, winnerID); err != nil {
+		UPDATE "Match" SET status = 'FINISHED', "finishedAt" = `+utcNow+`, "winnerEmpireId" = $2, "winnerEmpireIds" = $3 WHERE id = $1`,
+		matchID, winnerID, winnerIDs); err != nil {
 		return err
 	}
 	// The last turn never closes: its picture is taken here, so that the history
@@ -209,12 +216,20 @@ func Finish(ctx context.Context, tx pgx.Tx, matchID string, winnerID *string, tu
 		return err
 	}
 	data := map[string]string{}
-	if winnerID != nil {
-		var name string
-		if err := tx.QueryRow(ctx, `SELECT name FROM "Empire" WHERE id = $1`, *winnerID).Scan(&name); err != nil {
+	if len(winnerIDs) > 0 {
+		rows, err := tx.Query(ctx, `SELECT name FROM "Empire" WHERE id = ANY($1) ORDER BY "joinedAt", id`, winnerIDs)
+		if err != nil {
 			return err
 		}
-		data["winnerName"] = name
+		names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		data["winnerName"] = strings.Join(names, ", ")
+		if len(names) > 1 {
+			// Told apart by the interface, which writes the sentence.
+			data["result"] = "TIE"
+		}
 	}
 	if err := event(ctx, tx, matchID, turn, "MATCH_FINISHED", winnerID, data); err != nil {
 		return err
