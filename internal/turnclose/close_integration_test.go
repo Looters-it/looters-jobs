@@ -350,37 +350,32 @@ func TestStructuresExpireAtTheCloseOfTheirLastTurn(t *testing.T) {
 	}
 }
 
-func TestAllianceExitsTakeEffectAtTheCloseOfTheirTurn(t *testing.T) {
+func TestAnAllianceEndsAtTheCloseOfTheTurnAnnounced(t *testing.T) {
 	f := setup(t)
 	f.exec(`UPDATE "Empire" SET status = 'ACTIVE' WHERE id = 'carla'`)
-	f.exec(`INSERT INTO "Alliance" (id, "matchId", "createdTurn") VALUES ('al1', 'm1', 1)`)
-	// Anna announced her exit during turn 3: with one turn of notice it takes effect at the close of turn 4.
-	f.exec(`INSERT INTO "AllianceMember" ("empireId", "allianceId", "joinedTurn", "leavesAtTurn") VALUES
-		('anna', 'al1', 1, 4), ('bruno', 'al1', 1, NULL), ('carla', 'al1', 2, NULL)`)
-	members := func() int { return f.count(`SELECT count(*) FROM "AllianceMember"`) }
+	// Anna announced during turn 3 the end of her pact with Bruno: with one turn of
+	// notice it takes effect at the close of turn 4. Her pact with Carla is untouched.
+	f.exec(`INSERT INTO "Alliance" (id, "matchId", "createdTurn", "aEmpireId", "bEmpireId", "endsAtTurn", "endedByEmpireId") VALUES
+		('al1', 'm1', 1, 'anna', 'bruno', 4, 'anna'), ('al2', 'm1', 1, 'anna', 'carla', NULL, NULL)`)
+	pacts := func() int { return f.count(`SELECT count(*) FROM "Alliance"`) }
+	ended := func() int { return f.count(`SELECT count(*) FROM "GameEvent" WHERE type = 'ALLIANCE_ENDED'`) }
 
 	f.close(3)
-	if members() != 3 {
-		t.Fatalf("after turn 3: %d members, the exit should not be effective yet", members())
+	if pacts() != 2 || ended() != 0 {
+		t.Fatalf("after turn 3: %d pacts, the end should not be effective yet", pacts())
 	}
 	f.now = f.now.Add(12 * time.Hour)
 	f.close(4)
-	if members() != 2 || f.count(`SELECT count(*) FROM "AllianceMember" WHERE "empireId" = 'anna'`) != 0 {
-		t.Fatalf("after turn 4: %d members", members())
+	if pacts() != 1 || f.count(`SELECT count(*) FROM "Alliance" WHERE id = 'al2'`) != 1 {
+		t.Fatalf("after turn 4: %d pacts, want only the one with Carla", pacts())
 	}
-	if got := f.count(`SELECT count(*) FROM "Alliance" WHERE "dissolvedAt" IS NULL`); got != 1 {
-		t.Errorf("the alliance of two was dissolved")
+	var data string
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT data::text FROM "GameEvent" WHERE type = 'ALLIANCE_ENDED' AND "empireId" = 'anna'`).Scan(&data); err != nil {
+		t.Fatal(err)
 	}
-
-	// When one of the remaining two leaves, an alliance of one is dissolved.
-	f.exec(`UPDATE "AllianceMember" SET "leavesAtTurn" = 5 WHERE "empireId" = 'bruno'`)
-	f.now = f.now.Add(12 * time.Hour)
-	f.close(5)
-	if members() != 0 {
-		t.Errorf("%d members left in an alliance of one", members())
-	}
-	if got := f.count(`SELECT count(*) FROM "Alliance" WHERE "dissolvedAt" IS NOT NULL`); got != 1 {
-		t.Errorf("the alliance was not dissolved")
+	if !strings.Contains(data, `"empireName": "Anna"`) || !strings.Contains(data, `"otherName": "Bruno"`) {
+		t.Errorf("event data: %s", data)
 	}
 }
 

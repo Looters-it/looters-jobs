@@ -24,7 +24,7 @@
   "blockCost": 300,
   "blockTurns": 5,
   "blockCooldownTurns": 5,
-  "allianceMaxMembers": 3,
+  "allianceMaxAllies": 2,
   "allianceLeaveNoticeTurns": 1,
   "boardMaxChars": 500,
   "boardMessageIntervalSec": 20

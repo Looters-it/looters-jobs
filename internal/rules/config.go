@@ -42,7 +42,7 @@ type MatchRules struct {
 	BlockTurns             int     `json:"blockTurns"`
 	BlockCooldownTurns     int     `json:"blockCooldownTurns"`
 
-	AllianceMaxMembers       int `json:"allianceMaxMembers"`
+	AllianceMaxAllies        int `json:"allianceMaxAllies"`
 	AllianceLeaveNoticeTurns int `json:"allianceLeaveNoticeTurns"`
 
 	BoardMaxChars           int `json:"boardMaxChars"`

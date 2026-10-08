@@ -94,10 +94,8 @@ func CapitalLost(ctx context.Context, tx pgx.Tx, matchID, loserID, conquerorID, 
 	}
 
 	// A fallen empire is in no alliance.
-	if _, err := tx.Exec(ctx, `DELETE FROM "AllianceMember" WHERE "empireId" = $1`, loserID); err != nil {
-		return false, err
-	}
-	if err := dissolveSmallAlliances(ctx, tx, matchID); err != nil {
+	// A fallen empire has no allies: its pacts end with it.
+	if _, err := tx.Exec(ctx, `DELETE FROM "Alliance" WHERE "aEmpireId" = $1 OR "bEmpireId" = $1`, loserID); err != nil {
 		return false, err
 	}
 	// Nothing the empire built outlives it.
@@ -273,32 +271,33 @@ func ExpireStructures(ctx context.Context, tx pgx.Tx, matchID string, turn int) 
 	return err
 }
 
-// ApplyAllianceExits makes effective the exits announced for the turn that
-// is closing or earlier (PROMPT §2.6): until this moment the empire that is
-// leaving was still an ally in every respect.
+// ApplyAllianceExits ends the alliances whose end was announced for the turn
+// that is closing or earlier (PROMPT §2.6): until this moment the two empires
+// were still allies in every respect, and who announced it could take it back.
 func ApplyAllianceExits(ctx context.Context, tx pgx.Tx, matchID string, turn int) error {
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM "AllianceMember" m USING "Alliance" a
-		WHERE a.id = m."allianceId" AND a."matchId" = $1 AND m."leavesAtTurn" IS NOT NULL AND m."leavesAtTurn" <= $2`,
-		matchID, turn); err != nil {
+	rows, err := tx.Query(ctx, `
+		DELETE FROM "Alliance" a
+		USING "Empire" ender, "Empire" other
+		WHERE a."matchId" = $1 AND a."endsAtTurn" IS NOT NULL AND a."endsAtTurn" <= $2
+			AND ender.id = a."endedByEmpireId"
+			AND other.id = CASE WHEN a."aEmpireId" = ender.id THEN a."bEmpireId" ELSE a."aEmpireId" END
+		RETURNING ender.id, ender.name, other.name`, matchID, turn)
+	if err != nil {
 		return err
 	}
-	return dissolveSmallAlliances(ctx, tx, matchID)
-}
-
-// dissolveSmallAlliances ends the alliances left with fewer than two members:
-// an alliance of one is no alliance.
-func dissolveSmallAlliances(ctx context.Context, tx pgx.Tx, matchID string) error {
-	const small = `
-		SELECT a.id FROM "Alliance" a
-		WHERE a."matchId" = $1 AND a."dissolvedAt" IS NULL
-			AND (SELECT count(*) FROM "AllianceMember" m WHERE m."allianceId" = a.id) < 2`
-	if _, err := tx.Exec(ctx, `DELETE FROM "AllianceMember" WHERE "allianceId" IN (`+small+`)`, matchID); err != nil {
+	type ended struct{ enderID, ender, other string }
+	pacts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ended, error) {
+		var e ended
+		return e, row.Scan(&e.enderID, &e.ender, &e.other)
+	})
+	if err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `
-		UPDATE "Alliance" a SET "dissolvedAt" = `+utcNow+`
-		WHERE a."matchId" = $1 AND a."dissolvedAt" IS NULL
-			AND NOT EXISTS (SELECT 1 FROM "AllianceMember" m WHERE m."allianceId" = a.id)`, matchID)
-	return err
+	for _, pact := range pacts {
+		data := map[string]string{"empireName": pact.ender, "otherName": pact.other}
+		if err := event(ctx, tx, matchID, turn, "ALLIANCE_ENDED", &pact.enderID, data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
