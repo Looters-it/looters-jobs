@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gioco/jobs/internal/battle"
+	"gioco/jobs/internal/endgame"
 	"gioco/jobs/internal/queue"
 	"gioco/jobs/internal/rules"
 )
@@ -24,6 +25,8 @@ const (
 	// Stale: that turn is already closed, or the match is not being played.
 	// This is what makes the job repeatable: a second run changes nothing.
 	Stale Outcome = "stale"
+	// Finished: the turn was closed and it was the last one of the match.
+	Finished Outcome = "finished"
 )
 
 // Closer handles `turn.close` jobs.
@@ -76,14 +79,16 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 
 	var (
 		status     string
+		startAt    time.Time
+		maxDays    *int
 		current    int
 		turnEndsAt *time.Time
 		turnHours  float64
 		config     []byte
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT status::text, "currentTurn", "turnEndsAt", "turnHours", config FROM "Match" WHERE id = $1 FOR UPDATE`, matchID,
-	).Scan(&status, &current, &turnEndsAt, &turnHours, &config)
+		`SELECT status::text, "startAt", "maxDays", "currentTurn", "turnEndsAt", "turnHours", config FROM "Match" WHERE id = $1 FOR UPDATE`, matchID,
+	).Scan(&status, &startAt, &maxDays, &current, &turnEndsAt, &turnHours, &config)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Stale, nil
 	}
@@ -113,6 +118,21 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 		}
 	}
 
+	// A battle may have conquered the last capital but one: the match is then over,
+	// and there is no next turn to open.
+	if err := tx.QueryRow(ctx, `SELECT status::text FROM "Match" WHERE id = $1`, matchID).Scan(&status); err != nil {
+		return "", err
+	}
+	if status == "FINISHED" {
+		if err := snapshot(ctx, tx, matchID, turn); err != nil {
+			return "", err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return "", err
+		}
+		return Finished, nil
+	}
+
 	// Income comes after the battles, so it goes to whoever holds each territory now.
 	if err := creditIncome(ctx, tx, matchID, matchRules); err != nil {
 		return "", fmt.Errorf("income: %w", err)
@@ -125,14 +145,27 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 	// Protection of a just-acquired territory lasts "until the end of the turn it was
 	// acquired in": it is stored as that turn's number, so moving to the next turn ends it.
 
-	// Who owns each municipality at the end of this turn, for the history.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO "TurnSnapshot" ("matchId", turn, ownership)
-		SELECT $1, $2, coalesce(jsonb_object_agg(tu."geoUnitId"::text, t."ownerEmpireId"), '{}'::jsonb)
-		FROM "Territory" t JOIN "TerritoryUnit" tu ON tu."territoryId" = t.id
-		WHERE t."matchId" = $1 AND t."ownerEmpireId" IS NOT NULL
-		ON CONFLICT DO NOTHING`, matchID, turn); err != nil {
+	if err := endgame.UpdateAccumulationAlerts(ctx, tx, matchID, matchRules.AccumAlertPct, matchRules.AccumAlertMinTerritories); err != nil {
+		return "", fmt.Errorf("accumulation alerts: %w", err)
+	}
+	if err := snapshot(ctx, tx, matchID, turn); err != nil {
 		return "", err
+	}
+
+	// A match with a maximum duration ends at the first turn close on or after its deadline.
+	if deadline := endgame.Deadline(asUTC(startAt), maxDays); deadline != nil && !endsAt.Before(*deadline) {
+		winner, err := endgame.WinnerAtDeadline(ctx, tx, matchID)
+		if err != nil {
+			return "", err
+		}
+		if err := endgame.Finish(ctx, tx, matchID, winner, turn); err != nil {
+			return "", err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return "", err
+		}
+		c.Log.Info("match finished: deadline reached", "matchId", matchID, "turn", turn)
+		return Finished, nil
 	}
 
 	// The next turn ends one turn length after this one was due, not after
@@ -218,4 +251,15 @@ func creditIncome(ctx context.Context, tx pgx.Tx, matchID string, matchRules rul
 		return nil
 	}
 	return tx.SendBatch(ctx, batch).Close()
+}
+
+// snapshot saves who owns each municipality at the end of a turn, for the history.
+func snapshot(ctx context.Context, tx pgx.Tx, matchID string, turn int) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO "TurnSnapshot" ("matchId", turn, ownership)
+		SELECT $1, $2, coalesce(jsonb_object_agg(tu."geoUnitId"::text, t."ownerEmpireId"), '{}'::jsonb)
+		FROM "Territory" t JOIN "TerritoryUnit" tu ON tu."territoryId" = t.id
+		WHERE t."matchId" = $1 AND t."ownerEmpireId" IS NOT NULL
+		ON CONFLICT DO NOTHING`, matchID, turn)
+	return err
 }

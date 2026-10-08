@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"gioco/jobs/internal/endgame"
 	"gioco/jobs/internal/queue"
 	"gioco/jobs/internal/rules"
 )
@@ -198,6 +200,18 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 		return false, err
 	}
 	s.Log.Info("battle resolved", "battleId", battleID, "matchId", matchID, "outcome", outcome)
+
+	// Last, with this battle closed and its territories unlocked: if the
+	// conquered territory was the capital, the empire that lost it falls.
+	if attackerWins {
+		ended, err := endgame.CapitalLost(ctx, tx, matchID, defenderID, attackerID, targetID, turn)
+		if err != nil {
+			return false, fmt.Errorf("capital lost: %w", err)
+		}
+		if ended {
+			s.Log.Info("match finished: one empire left", "matchId", matchID, "winner", attackerID)
+		}
+	}
 	return true, nil
 }
 

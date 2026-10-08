@@ -229,3 +229,98 @@ func TestRefusesToCloseATurnBeforeItEnds(t *testing.T) {
 	}
 	f.expectResources(map[string]int{"A1": 100})
 }
+
+func TestMatchEndsAtItsDeadlineAndTheRichestEmpireWins(t *testing.T) {
+	f := setup(t)
+	// Started 36 hours before this turn ends, with a maximum of one day: the deadline has passed.
+	f.exec(`UPDATE "Match" SET "maxDays" = 1 WHERE id = 'm1'`)
+	if got := f.close(3); got != turnclose.Finished {
+		t.Fatalf("outcome = %s", got)
+	}
+	var status string
+	var winner *string
+	var turn int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT status::text, "winnerEmpireId", "currentTurn" FROM "Match" WHERE id = 'm1'`).Scan(&status, &winner, &turn); err != nil {
+		t.Fatal(err)
+	}
+	// Income of the last turn counts: Anna ends with 200, Bruno with 65.
+	if status != "FINISHED" || winner == nil || *winner != "anna" || turn != 3 {
+		t.Fatalf("match %s at turn %d, winner %v", status, turn, winner)
+	}
+	if got := f.count(`SELECT count(*) FROM "Job" WHERE type = 'turn.close'`); got != 0 {
+		t.Errorf("%d further closings queued for a finished match", got)
+	}
+	if got := f.count(`SELECT count(*) FROM "TurnSnapshot" WHERE turn = 3`); got != 1 {
+		t.Errorf("the last turn has %d snapshots", got)
+	}
+}
+
+func TestDeadlineNotReachedKeepsTheMatchRunning(t *testing.T) {
+	f := setup(t)
+	f.exec(`UPDATE "Match" SET "maxDays" = 2 WHERE id = 'm1'`) // ends 12 hours after this turn
+	if got := f.close(3); got != turnclose.Closed {
+		t.Fatalf("outcome = %s", got)
+	}
+	f.now = f.now.Add(12 * time.Hour)
+	if got := f.close(4); got != turnclose.Finished {
+		t.Fatalf("turn 4: outcome = %s", got)
+	}
+}
+
+func TestWithEqualResourcesTheEmpireWithMoreMunicipalitiesWins(t *testing.T) {
+	winnerWhenBrunoHolds := func(resources int) string {
+		f := setup(t)
+		f.exec(`UPDATE "Match" SET "maxDays" = 1 WHERE id = 'm1'`)
+		f.exec(`UPDATE "Territory" SET resources = $1 WHERE id = 'B1'`, resources)
+		f.close(3)
+		var winner string
+		if err := f.pool.QueryRow(context.Background(), `SELECT "winnerEmpireId" FROM "Match" WHERE id = 'm1'`).Scan(&winner); err != nil {
+			t.Fatal(err)
+		}
+		return winner
+	}
+	// After the last income Anna holds 200 on three municipalities. Bruno, on one,
+	// earns 60: starting from 140 he ends with 200 as well.
+	if got := winnerWhenBrunoHolds(140); got != "anna" {
+		t.Errorf("winner = %s, want anna (same resources, more municipalities)", got)
+	}
+	// One resource more and Bruno wins, whatever the municipalities.
+	if got := winnerWhenBrunoHolds(141); got != "bruno" {
+		t.Errorf("winner = %s, want bruno (more resources)", got)
+	}
+}
+
+func TestAccumulationAlert(t *testing.T) {
+	f := setup(t)
+	// Anna gets a third territory, so the rule applies to her (at least three territories).
+	// A1 holds far more than half of her resources.
+	f.exec(`INSERT INTO "Territory" (id, "matchId", name, resources, "ownerEmpireId") VALUES ('A3', 'm1', 'A3', 5, 'anna')`)
+	f.exec(`UPDATE "Territory" SET resources = 900 WHERE id = 'A1'`)
+	alerts := func() int { return f.count(`SELECT count(*) FROM "Territory" WHERE alert`) }
+	above := func() int { return f.count(`SELECT count(*) FROM "Territory" WHERE "aboveAlertAtLastClose"`) }
+
+	// First close above the threshold: noted, not yet shown.
+	f.close(3)
+	if alerts() != 0 || above() != 1 {
+		t.Fatalf("after one close: %d alerts, %d above", alerts(), above())
+	}
+	// Second close in a row: the alert appears, on A1 only.
+	f.now = f.now.Add(12 * time.Hour)
+	f.close(4)
+	if got := f.count(`SELECT count(*) FROM "Territory" WHERE alert AND id = 'A1'`); got != 1 || alerts() != 1 {
+		t.Fatalf("after two closes: %d alerts in all, %d on A1", alerts(), got)
+	}
+	// Bruno's single territory holds all he has, but with fewer than three territories the rule does not apply.
+	if got := f.count(`SELECT count(*) FROM "Territory" WHERE id = 'B1' AND (alert OR "aboveAlertAtLastClose")`); got != 0 {
+		t.Error("an empire with one territory raised an alert")
+	}
+	// Back under the threshold: the alert goes away at the next close.
+	f.exec(`UPDATE "Territory" SET resources = 10 WHERE id = 'A1'`)
+	f.exec(`UPDATE "Territory" SET resources = 500 WHERE id = 'A2'`)
+	f.now = f.now.Add(12 * time.Hour)
+	f.close(5)
+	if got := f.count(`SELECT count(*) FROM "Territory" WHERE alert`); got != 0 {
+		t.Errorf("%d alerts left after going back under the threshold", got)
+	}
+}

@@ -59,15 +59,17 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.exec(`INSERT INTO "User" (id, username, email, "passwordHash") VALUES ('u1','anna','a@example.test','x'), ('u2','bruno','b@example.test','x')`)
+	f.exec(`INSERT INTO "User" (id, username, email, "passwordHash") VALUES ('u1','anna','a@example.test','x'), ('u2','bruno','b@example.test','x'), ('u3','carla','c@example.test','x')`)
 	f.exec(`INSERT INTO "Match" (id, name, "ownerId", status, "startAt", "turnHours", "currentTurn", "turnEndsAt", config)
 		VALUES ('m1', 'Prova', 'u1', 'RUNNING', $1, 12, 3, $2, $3::jsonb)`, turnEnd.Add(-36*time.Hour), turnEnd, string(config))
 	f.exec(`INSERT INTO "Empire" (id, "matchId", "userId", name, color, emblem, "capitalTerritoryId") VALUES
-		('anna', 'm1', 'u1', 'Anna', '#111111', 'torre', 'A1'), ('bruno', 'm1', 'u2', 'Bruno', '#222222', 'luna', 'B1')`)
+		('anna', 'm1', 'u1', 'Anna', '#111111', 'torre', 'A1'), ('bruno', 'm1', 'u2', 'Bruno', '#222222', 'luna', 'B1'),
+		('carla', 'm1', 'u3', 'Carla', '#333333', 'luna', 'C1')`)
 	// After the declaration: A1 holds 50 of its 100, A2 10 of its 20. The target B2 still holds 80.
 	f.exec(`INSERT INTO "Territory" (id, "matchId", name, resources, "ownerEmpireId") VALUES
 		('A1', 'm1', 'Abbiategrasso', 50, 'anna'), ('A2', 'm1', 'Albairate', 10, 'anna'),
-		('B1', 'm1', 'Binasco', 300, 'bruno'), ('B2', 'm1', 'Bollate', 80, 'bruno')`)
+		('B1', 'm1', 'Binasco', 300, 'bruno'), ('B2', 'm1', 'Bollate', 80, 'bruno'),
+		('C1', 'm1', 'Corsico', 70, 'carla'), ('C2', 'm1', 'Cusago', 40, 'carla')`)
 	f.declare("b1", "B2", 120, 80, map[string][2]int{"A1": {50, 100}, "A2": {10, 20}})
 	return f
 }
@@ -277,7 +279,8 @@ func TestTurnCloseFightsUnansweredBattlesAsADefence(t *testing.T) {
 	f := setup(t)
 	// A second battle whose surrender never reached the queue.
 	f.exec(`INSERT INTO "Territory" (id, "matchId", name, resources, "ownerEmpireId") VALUES ('A3', 'm1', 'Arese', 30, 'anna')`)
-	f.declare("b2", "B1", 60, 300, map[string][2]int{"A3": {30, 60}})
+	f.exec(`INSERT INTO "Territory" (id, "matchId", name, resources, "ownerEmpireId") VALUES ('B3', 'm1', 'Bresso', 300, 'bruno')`)
+	f.declare("b2", "B3", 60, 300, map[string][2]int{"A3": {30, 60}})
 	f.answer("b2", "SURRENDER")
 	f.rolls = []float64{0.9, 0.2} // for b1, fought because nobody answered
 
@@ -309,7 +312,7 @@ func TestTurnCloseFightsUnansweredBattlesAsADefence(t *testing.T) {
 		t.Errorf("%d territories still locked", got)
 	}
 	// Conquered while the turn was closing: protected through the turn that begins.
-	for _, id := range []string{"B1", "B2"} {
+	for _, id := range []string{"B3", "B2"} {
 		if got := f.territory(id); got.owner != "anna" || got.protected == nil || *got.protected != 4 {
 			t.Errorf("%s: owner %s, protected until %v, want anna until 4", id, got.owner, got.protected)
 		}
@@ -371,5 +374,113 @@ func TestManyBattlesResolvedAtTheSameTime(t *testing.T) {
 	}
 	if got := f.count(`SELECT count(*) FROM "GameEvent" WHERE type = 'BATTLE_RESOLVED'`); got != n {
 		t.Errorf("%d events, want %d", got, n)
+	}
+}
+
+// declareBy stores an open battle between any two empires.
+func (f *fixture) declareBy(id, attacker, defender, target, source string, cost, resourcesAtDeclaration int) {
+	f.t.Helper()
+	f.exec(`INSERT INTO "Battle" (id, "matchId", turn, "attackerEmpireId", "defenderEmpireId", "targetTerritoryId",
+			"attackPct", "attackCost", "attackForce", "defenseForce")
+		VALUES ($1, 'm1', 3, $2, $3, $4, 50, $5, $6, 1)`, id, attacker, defender, target, cost, resourcesAtDeclaration)
+	f.exec(`INSERT INTO "BattleSource" ("battleId", "territoryId", cost, "resourcesAtDeclaration") VALUES ($1, $2, $3, $4)`,
+		id, source, cost, resourcesAtDeclaration)
+	f.exec(`INSERT INTO "BattleLock" ("territoryId", "battleId") VALUES ($1, $3), ($2, $3)`, target, source, id)
+}
+
+func TestConqueringTheCapitalMakesTheEmpireFall(t *testing.T) {
+	f := setup(t)
+	f.exec(`DELETE FROM "Battle"`)
+	// Anna attacks Bruno's capital, B1. Meanwhile Bruno attacks Carla's C1 from B2 (20 of
+	// 40 reserved) and Carla attacks a third territory of Bruno, B3, from C2 (20 of 40).
+	f.exec(`UPDATE "Territory" SET resources = 100 WHERE id = 'A1'`)
+	f.exec(`UPDATE "Territory" SET resources = 20 WHERE id IN ('B2', 'C2')`)
+	f.exec(`INSERT INTO "Territory" (id, "matchId", name, resources, "ownerEmpireId", "protectedUntilTurn") VALUES ('B3', 'm1', 'Bresso', 55, 'bruno', 3)`)
+	f.declare("capital", "B1", 200, 300, map[string][2]int{"A1": {100, 200}})
+	f.declareBy("bruno-attacks", "bruno", "carla", "C1", "B2", 20, 40)
+	f.declareBy("carla-attacks", "carla", "bruno", "B3", "C2", 20, 40)
+	f.answer("capital", "SURRENDER")
+
+	if !f.resolve("capital") {
+		t.Fatal("not resolved")
+	}
+
+	// The conqueror gets the capital only, with its resources.
+	f.expect("B1", "anna", 300)
+	// Everything else Bruno had is no man's land and keeps what was on it: the cost of
+	// the cancelled attack is back on B2, and B3 is no longer protected.
+	f.expect("B2", "", 40)
+	f.expect("B3", "", 55)
+	if got := f.territory("B3").protected; got != nil {
+		t.Errorf("a freed territory is still protected until %d", *got)
+	}
+	// Carla's attack on a territory that is now free is cancelled too, and refunded.
+	f.expect("C2", "carla", 40)
+	f.expect("C1", "carla", 70)
+
+	var status string
+	var fallenTurn int
+	var capital *string
+	f.scan(`SELECT status::text, "fallenTurn", "capitalTerritoryId" FROM "Empire" WHERE id = 'bruno'`, &status, &fallenTurn, &capital)
+	if status != "FALLEN" || fallenTurn != 3 || capital != nil {
+		t.Errorf("Bruno: %s at turn %d, capital %v", status, fallenTurn, capital)
+	}
+	if got := f.count(`SELECT count(*) FROM "Battle" WHERE outcome = 'CANCELLED' AND status = 'RESOLVED'`); got != 2 {
+		t.Errorf("%d battles cancelled, want 2", got)
+	}
+	if got := f.count(`SELECT count(*) FROM "BattleLock"`); got != 0 {
+		t.Errorf("%d territories still locked", got)
+	}
+	var data string
+	f.scan(`SELECT data::text FROM "GameEvent" WHERE type = 'EMPIRE_FALLEN'`, &data)
+	if !strings.Contains(data, `"empireName": "Bruno"`) || !strings.Contains(data, `"byEmpireName": "Anna"`) {
+		t.Errorf("event data: %s", data)
+	}
+	// Two empires are still standing: the match goes on.
+	f.scan(`SELECT status::text FROM "Match" WHERE id = 'm1'`, &status)
+	if status != "RUNNING" {
+		t.Errorf("match is %s", status)
+	}
+}
+
+func TestLosingAnotherTerritoryDoesNotMakeAnEmpireFall(t *testing.T) {
+	f := setup(t)
+	f.answer("b1", "SURRENDER") // B2 is not Bruno's capital
+	f.resolve("b1")
+	var status string
+	f.scan(`SELECT status::text FROM "Empire" WHERE id = 'bruno'`, &status)
+	if status != "ACTIVE" {
+		t.Errorf("Bruno is %s", status)
+	}
+	f.expect("B1", "bruno", 300)
+}
+
+func TestTheLastEmpireStandingWins(t *testing.T) {
+	f := setup(t)
+	f.exec(`DELETE FROM "Battle"`)
+	// Carla has already fallen: when Bruno falls too, Anna is alone.
+	f.exec(`UPDATE "Empire" SET status = 'FALLEN', "capitalTerritoryId" = NULL WHERE id = 'carla'`)
+	f.exec(`UPDATE "Territory" SET "ownerEmpireId" = NULL WHERE id IN ('C1', 'C2')`)
+	f.exec(`UPDATE "Territory" SET resources = 100 WHERE id = 'A1'`)
+	f.declare("last", "B1", 200, 300, map[string][2]int{"A1": {100, 200}})
+	f.answer("last", "SURRENDER")
+	f.resolve("last")
+
+	var status string
+	var winner *string
+	f.scan(`SELECT status::text, "winnerEmpireId" FROM "Match" WHERE id = 'm1'`, &status, &winner)
+	if status != "FINISHED" || winner == nil || *winner != "anna" {
+		t.Fatalf("match %s, winner %v", status, winner)
+	}
+	var data string
+	f.scan(`SELECT data::text FROM "GameEvent" WHERE type = 'MATCH_FINISHED'`, &data)
+	if !strings.Contains(data, `"winnerName": "Anna"`) {
+		t.Errorf("event data: %s", data)
+	}
+	// Nothing more is resolved in a finished match.
+	f.declareBy("late", "anna", "bruno", "B2", "A2", 5, 10)
+	f.answer("late", "DEFEND")
+	if f.resolve("late") {
+		t.Error("a battle was resolved after the match ended")
 	}
 }
