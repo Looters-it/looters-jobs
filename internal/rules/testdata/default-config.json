@@ -1,4 +1,6 @@
 {
+  "minPlayersToStart": 2,
+  "lateJoin": true,
   "startResources": 200,
   "hiddenMin": 10,
   "hiddenMax": 100,

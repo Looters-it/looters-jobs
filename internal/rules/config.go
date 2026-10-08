@@ -11,6 +11,9 @@ import (
 // Field names are shared with the api (src/rules/config.ts): the api owns
 // the defaults and validation, this service only reads the stored object.
 type MatchRules struct {
+	MinPlayersToStart int  `json:"minPlayersToStart"`
+	LateJoin          bool `json:"lateJoin"`
+
 	StartResources int     `json:"startResources"`
 	HiddenMin      int     `json:"hiddenMin"`
 	HiddenMax      int     `json:"hiddenMax"`

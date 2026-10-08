@@ -10,23 +10,40 @@ import (
 
 	"gioco/jobs/internal/battlequeue"
 	"gioco/jobs/internal/geoprocess"
+	"gioco/jobs/internal/matchstart"
 	"gioco/jobs/internal/queue"
 )
 
-// Job types. match.start and turn.close arrive with later milestones.
+// Job types. turn.close arrives with a later milestone.
 const (
 	TypePing       = "system.ping"
 	TypeGeoProcess = "geo.process"
+	TypeMatchStart = "match.start"
 )
 
 // KindPong is the notification sent in reply to a ping.
 const KindPong = "system.pong"
 
 // All returns the handlers for every job type this service knows.
-func All(db queue.Querier, geo *geoprocess.Processor) map[string]queue.Handler {
+func All(db queue.Querier, geo *geoprocess.Processor, starter *matchstart.Starter) map[string]queue.Handler {
 	return map[string]queue.Handler{
 		TypePing:       Ping(db),
 		TypeGeoProcess: GeoProcess(geo),
+		TypeMatchStart: MatchStart(starter),
+	}
+}
+
+// MatchStart starts a match whose start time has come.
+func MatchStart(starter *matchstart.Starter) queue.Handler {
+	return func(ctx context.Context, job queue.Job) error {
+		var payload struct {
+			MatchID string `json:"matchId"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.MatchID == "" {
+			return fmt.Errorf("%w: invalid match.start payload %s", queue.ErrPermanent, job.Payload)
+		}
+		_, err := starter.Start(ctx, payload.MatchID)
+		return err
 	}
 }
 
