@@ -92,6 +92,13 @@ func CapitalLost(ctx context.Context, tx pgx.Tx, matchID, loserID, conquerorID, 
 		return false, err
 	}
 
+	// A fallen empire is in no alliance.
+	if _, err := tx.Exec(ctx, `DELETE FROM "AllianceMember" WHERE "empireId" = $1`, loserID); err != nil {
+		return false, err
+	}
+	if err := dissolveSmallAlliances(ctx, tx, matchID); err != nil {
+		return false, err
+	}
 	// Nothing the empire built outlives it.
 	if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE "empireId" = $1 AND active`, loserID); err != nil {
 		return false, err
@@ -238,5 +245,35 @@ func ExpireStructures(ctx context.Context, tx pgx.Tx, matchID string, turn int) 
 	_, err := tx.Exec(ctx, `
 		UPDATE "Structure" SET active = false
 		WHERE "matchId" = $1 AND active AND "expiresTurn" IS NOT NULL AND "expiresTurn" <= $2`, matchID, turn)
+	return err
+}
+
+// ApplyAllianceExits makes effective the exits announced for the turn that
+// is closing or earlier (PROMPT §2.6): until this moment the empire that is
+// leaving was still an ally in every respect.
+func ApplyAllianceExits(ctx context.Context, tx pgx.Tx, matchID string, turn int) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM "AllianceMember" m USING "Alliance" a
+		WHERE a.id = m."allianceId" AND a."matchId" = $1 AND m."leavesAtTurn" IS NOT NULL AND m."leavesAtTurn" <= $2`,
+		matchID, turn); err != nil {
+		return err
+	}
+	return dissolveSmallAlliances(ctx, tx, matchID)
+}
+
+// dissolveSmallAlliances ends the alliances left with fewer than two members:
+// an alliance of one is no alliance.
+func dissolveSmallAlliances(ctx context.Context, tx pgx.Tx, matchID string) error {
+	const small = `
+		SELECT a.id FROM "Alliance" a
+		WHERE a."matchId" = $1 AND a."dissolvedAt" IS NULL
+			AND (SELECT count(*) FROM "AllianceMember" m WHERE m."allianceId" = a.id) < 2`
+	if _, err := tx.Exec(ctx, `DELETE FROM "AllianceMember" WHERE "allianceId" IN (`+small+`)`, matchID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE "Alliance" a SET "dissolvedAt" = `+utcNow+`
+		WHERE a."matchId" = $1 AND a."dissolvedAt" IS NULL
+			AND NOT EXISTS (SELECT 1 FROM "AllianceMember" m WHERE m."allianceId" = a.id)`, matchID)
 	return err
 }

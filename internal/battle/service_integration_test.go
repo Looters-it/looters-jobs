@@ -548,3 +548,22 @@ func TestConqueringTheSecondCapitalOnlyTakesThatTerritory(t *testing.T) {
 		t.Errorf("%d structures still active", got)
 	}
 }
+
+func TestAFallenEmpireLeavesItsAlliance(t *testing.T) {
+	f := setup(t)
+	f.exec(`DELETE FROM "Battle"`)
+	f.exec(`UPDATE "Territory" SET resources = 100 WHERE id = 'A1'`)
+	f.exec(`INSERT INTO "Alliance" (id, "matchId", "createdTurn") VALUES ('al1', 'm1', 1)`)
+	f.exec(`INSERT INTO "AllianceMember" ("empireId", "allianceId", "joinedTurn") VALUES ('bruno', 'al1', 1), ('carla', 'al1', 1)`)
+	f.declare("capital", "B1", 200, 300, map[string][2]int{"A1": {100, 200}})
+	f.answer("capital", "SURRENDER")
+	f.resolve("capital")
+
+	// Bruno fell: Carla is left alone, and an alliance of one is dissolved.
+	if got := f.count(`SELECT count(*) FROM "AllianceMember"`); got != 0 {
+		t.Errorf("%d members left", got)
+	}
+	if got := f.count(`SELECT count(*) FROM "Alliance" WHERE "dissolvedAt" IS NOT NULL`); got != 1 {
+		t.Error("the alliance was not dissolved")
+	}
+}

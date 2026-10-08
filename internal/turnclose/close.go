@@ -145,6 +145,9 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 	// Protection of a just-acquired territory lasts "until the end of the turn it was
 	// acquired in": it is stored as that turn's number, so moving to the next turn ends it.
 
+	if err := endgame.ApplyAllianceExits(ctx, tx, matchID, turn); err != nil {
+		return "", fmt.Errorf("alliances: %w", err)
+	}
 	if err := endgame.ExpireStructures(ctx, tx, matchID, turn); err != nil {
 		return "", fmt.Errorf("structures: %w", err)
 	}

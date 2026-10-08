@@ -348,3 +348,37 @@ func TestStructuresExpireAtTheCloseOfTheirLastTurn(t *testing.T) {
 		t.Fatalf("after turn 4: ends-later=%v permanent=%v", active("ends-later"), active("permanent"))
 	}
 }
+
+func TestAllianceExitsTakeEffectAtTheCloseOfTheirTurn(t *testing.T) {
+	f := setup(t)
+	f.exec(`UPDATE "Empire" SET status = 'ACTIVE' WHERE id = 'carla'`)
+	f.exec(`INSERT INTO "Alliance" (id, "matchId", "createdTurn") VALUES ('al1', 'm1', 1)`)
+	// Anna announced her exit during turn 3: with one turn of notice it takes effect at the close of turn 4.
+	f.exec(`INSERT INTO "AllianceMember" ("empireId", "allianceId", "joinedTurn", "leavesAtTurn") VALUES
+		('anna', 'al1', 1, 4), ('bruno', 'al1', 1, NULL), ('carla', 'al1', 2, NULL)`)
+	members := func() int { return f.count(`SELECT count(*) FROM "AllianceMember"`) }
+
+	f.close(3)
+	if members() != 3 {
+		t.Fatalf("after turn 3: %d members, the exit should not be effective yet", members())
+	}
+	f.now = f.now.Add(12 * time.Hour)
+	f.close(4)
+	if members() != 2 || f.count(`SELECT count(*) FROM "AllianceMember" WHERE "empireId" = 'anna'`) != 0 {
+		t.Fatalf("after turn 4: %d members", members())
+	}
+	if got := f.count(`SELECT count(*) FROM "Alliance" WHERE "dissolvedAt" IS NULL`); got != 1 {
+		t.Errorf("the alliance of two was dissolved")
+	}
+
+	// When one of the remaining two leaves, an alliance of one is dissolved.
+	f.exec(`UPDATE "AllianceMember" SET "leavesAtTurn" = 5 WHERE "empireId" = 'bruno'`)
+	f.now = f.now.Add(12 * time.Hour)
+	f.close(5)
+	if members() != 0 {
+		t.Errorf("%d members left in an alliance of one", members())
+	}
+	if got := f.count(`SELECT count(*) FROM "Alliance" WHERE "dissolvedAt" IS NOT NULL`); got != 1 {
+		t.Errorf("the alliance was not dissolved")
+	}
+}
