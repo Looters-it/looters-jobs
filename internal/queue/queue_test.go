@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,6 +20,8 @@ type fakeStore struct {
 	pending   []Job
 	completed []string
 	failed    map[string]failure
+	mu        sync.Mutex
+	touched   []string
 }
 
 func (s *fakeStore) Claim(context.Context) (*Job, error) {
@@ -40,6 +43,13 @@ func (s *fakeStore) Fail(_ context.Context, id, reason string, retryAt *time.Tim
 		s.failed = map[string]failure{}
 	}
 	s.failed[id] = failure{reason, retryAt}
+	return nil
+}
+
+func (s *fakeStore) Touch(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.touched = append(s.touched, id)
 	return nil
 }
 
@@ -124,5 +134,22 @@ func TestProcessNextGivesUp(t *testing.T) {
 				t.Fatalf("failure record %+v (recorded=%v), want retried=%v", got, ok, tc.retried)
 			}
 		})
+	}
+}
+
+func TestLongJobKeepsItsClaim(t *testing.T) {
+	store := &fakeStore{pending: []Job{{ID: "long", Type: "slow", Attempts: 1}}}
+	worker := newWorker(store, map[string]Handler{"slow": func(context.Context, Job) error {
+		time.Sleep(100 * time.Millisecond)
+		return nil
+	}})
+	worker.StaleAfter = 30 * time.Millisecond // renewed every 10ms
+	if _, err := worker.ProcessNext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.touched) < 3 || store.touched[0] != "long" {
+		t.Fatalf("claim renewed %d times", len(store.touched))
 	}
 }

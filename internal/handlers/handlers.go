@@ -4,24 +4,43 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"gioco/jobs/internal/battlequeue"
+	"gioco/jobs/internal/geoprocess"
 	"gioco/jobs/internal/queue"
 )
 
-// Job types. geo.process, match.start and turn.close arrive with later milestones.
+// Job types. match.start and turn.close arrive with later milestones.
 const (
-	TypePing = "system.ping"
+	TypePing       = "system.ping"
+	TypeGeoProcess = "geo.process"
 )
 
 // KindPong is the notification sent in reply to a ping.
 const KindPong = "system.pong"
 
 // All returns the handlers for every job type this service knows.
-func All(db queue.Querier) map[string]queue.Handler {
+func All(db queue.Querier, geo *geoprocess.Processor) map[string]queue.Handler {
 	return map[string]queue.Handler{
-		TypePing: Ping(db),
+		TypePing:       Ping(db),
+		TypeGeoProcess: GeoProcess(geo),
+	}
+}
+
+// GeoProcess validates an uploaded file and stores its municipalities,
+// their display geometry and their adjacency.
+func GeoProcess(processor *geoprocess.Processor) queue.Handler {
+	return func(ctx context.Context, job queue.Job) error {
+		var payload struct {
+			UploadID string `json:"uploadId"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.UploadID == "" {
+			return fmt.Errorf("%w: invalid geo.process payload %s", queue.ErrPermanent, job.Payload)
+		}
+		return processor.Process(ctx, payload.UploadID)
 	}
 }
 

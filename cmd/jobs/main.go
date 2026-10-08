@@ -14,6 +14,7 @@ import (
 	"gioco/jobs/internal/battlequeue"
 	"gioco/jobs/internal/config"
 	"gioco/jobs/internal/db"
+	"gioco/jobs/internal/geoprocess"
 	"gioco/jobs/internal/handlers"
 	"gioco/jobs/internal/queue"
 )
@@ -47,8 +48,10 @@ func run(log *slog.Logger) error {
 	}
 
 	worker := &queue.Worker{
-		Store:        queue.PgStore{Pool: pool},
-		Handlers:     handlers.All(pool),
+		Store: queue.PgStore{Pool: pool},
+		Handlers: handlers.All(pool, &geoprocess.Processor{
+			Pool: pool, UploadDir: cfg.UploadDir, Geo: cfg.Geo, Log: log,
+		}),
 		Workers:      cfg.Workers,
 		MaxAttempts:  cfg.MaxAttempts,
 		PollInterval: cfg.PollInterval,

@@ -29,6 +29,8 @@ type Store interface {
 	Complete(ctx context.Context, id string) error
 	// Fail records the error; a nil retryAt marks the job as permanently failed.
 	Fail(ctx context.Context, id string, reason string, retryAt *time.Time) error
+	// Touch renews the claim on a job that is still running.
+	Touch(ctx context.Context, id string) error
 	// ReleaseStale returns to the queue jobs claimed before the cutoff and never finished.
 	ReleaseStale(ctx context.Context, cutoff time.Time) (int64, error)
 }
@@ -139,6 +141,29 @@ func (w *Worker) run(ctx context.Context, job Job) (err error) {
 			err = fmt.Errorf("handler panic: %v", r)
 		}
 	}()
+
+	// Long jobs (a whole country of boundaries) outlive StaleAfter: renew the
+	// claim while the handler runs, so the job is not handed to another worker.
+	if w.StaleAfter > 0 {
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			ticker := time.NewTicker(w.StaleAfter / 3)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := w.Store.Touch(ctx, job.ID); err != nil && ctx.Err() == nil {
+						w.Log.Error("renew job claim", "id", job.ID, "err", err)
+					}
+				}
+			}
+		}()
+	}
 	return handler(ctx, job)
 }
 

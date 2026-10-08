@@ -64,6 +64,11 @@ func (s PgStore) Fail(ctx context.Context, id string, reason string, retryAt *ti
 	return err
 }
 
+func (s PgStore) Touch(ctx context.Context, id string) error {
+	_, err := s.Pool.Exec(ctx, `UPDATE "Job" SET "lockedAt" = `+utcNow+` WHERE id = $1 AND status = 'RUNNING'`, id)
+	return err
+}
+
 func (s PgStore) ReleaseStale(ctx context.Context, cutoff time.Time) (int64, error) {
 	tag, err := s.Pool.Exec(ctx,
 		`UPDATE "Job" SET status = 'PENDING', "lockedAt" = NULL WHERE status = 'RUNNING' AND "lockedAt" < $1`, cutoff.UTC())

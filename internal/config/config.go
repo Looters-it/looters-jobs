@@ -21,6 +21,20 @@ type Config struct {
 	KafkaBrokers     []string
 	KafkaBattleTopic string
 	KafkaGroup       string
+
+	Geo GeoConfig
+}
+
+// GeoConfig tunes the processing of uploaded boundaries. Distances are in metres.
+type GeoConfig struct {
+	// SimplifyToleranceM is how much detail the display geometry loses.
+	SimplifyToleranceM float64
+	// AdjacencyGapM is the widest gap between two borders still treated as contact:
+	// real datasets rarely match to the centimetre.
+	AdjacencyGapM float64
+	// AdjacencyMinBorderM is the shortest shared border that makes two units
+	// adjacent; touching at a corner does not.
+	AdjacencyMinBorderM float64
 }
 
 // Load builds the configuration using getenv (os.Getenv in production).
@@ -46,6 +60,17 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	cfg.KafkaBattleTopic = orDefault(getenv("KAFKA_BATTLE_TOPIC"), "battle.resolve")
 	cfg.KafkaGroup = orDefault(getenv("KAFKA_GROUP_ID"), "gioco-jobs")
+
+	var err error
+	if cfg.Geo.SimplifyToleranceM, err = positiveFloat(getenv, "GEO_SIMPLIFY_TOLERANCE_M", 50); err != nil {
+		return Config{}, err
+	}
+	if cfg.Geo.AdjacencyGapM, err = positiveFloat(getenv, "GEO_ADJACENCY_GAP_M", 5); err != nil {
+		return Config{}, err
+	}
+	if cfg.Geo.AdjacencyMinBorderM, err = positiveFloat(getenv, "GEO_ADJACENCY_MIN_BORDER_M", 50); err != nil {
+		return Config{}, err
+	}
 
 	pollMs, err := positiveInt(getenv, "JOBS_POLL_MS", 1000)
 	if err != nil {
@@ -83,4 +108,16 @@ func orDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func positiveFloat(getenv func(string) string, name string, fallback float64) (float64, error) {
+	raw := getenv(name)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive number, got %q", name, raw)
+	}
+	return value, nil
 }

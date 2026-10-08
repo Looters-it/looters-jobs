@@ -156,7 +156,7 @@ func TestPingRepliesOnGameEventsChannel(t *testing.T) {
 	}
 
 	insertJob(t, pool, "ping", handlers.TypePing, time.Now().Add(-time.Second))
-	worker := &queue.Worker{Store: queue.PgStore{Pool: pool}, Handlers: handlers.All(pool), MaxAttempts: 1, Log: discardLog()}
+	worker := &queue.Worker{Store: queue.PgStore{Pool: pool}, Handlers: map[string]queue.Handler{handlers.TypePing: handlers.Ping(pool)}, MaxAttempts: 1, Log: discardLog()}
 	if worked, err := worker.ProcessNext(ctx); !worked || err != nil {
 		t.Fatalf("worked=%v err=%v", worked, err)
 	}
