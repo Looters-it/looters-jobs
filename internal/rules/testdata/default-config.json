@@ -26,5 +26,6 @@
   "blockCooldownTurns": 5,
   "allianceMaxMembers": 3,
   "allianceLeaveNoticeTurns": 1,
-  "boardMaxChars": 500
+  "boardMaxChars": 500,
+  "boardMessageIntervalSec": 20
 }

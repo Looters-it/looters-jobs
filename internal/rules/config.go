@@ -45,7 +45,8 @@ type MatchRules struct {
 	AllianceMaxMembers       int `json:"allianceMaxMembers"`
 	AllianceLeaveNoticeTurns int `json:"allianceLeaveNoticeTurns"`
 
-	BoardMaxChars int `json:"boardMaxChars"`
+	BoardMaxChars           int `json:"boardMaxChars"`
+	BoardMessageIntervalSec int `json:"boardMessageIntervalSec"`
 }
 
 // ParseMatchRules decodes Match.config. Unknown keys are an error: they mean
