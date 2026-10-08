@@ -477,6 +477,10 @@ func TestTheLastEmpireStandingWins(t *testing.T) {
 	if !strings.Contains(data, `"winnerName": "Anna"`) {
 		t.Errorf("event data: %s", data)
 	}
+	// The last turn never closes: its picture is taken when the match ends.
+	if got := f.count(`SELECT count(*) FROM "TurnSnapshot" s JOIN "Match" m ON m.id = s."matchId" AND m."currentTurn" = s.turn`); got != 1 {
+		t.Errorf("snapshots of the last turn = %d, want 1", got)
+	}
 	// Nothing more is resolved in a finished match.
 	f.declareBy("late", "anna", "bruno", "B2", "A2", 5, 10)
 	f.answer("late", "DEFEND")

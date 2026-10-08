@@ -198,6 +198,16 @@ func Finish(ctx context.Context, tx pgx.Tx, matchID string, winnerID *string, tu
 		matchID, winnerID); err != nil {
 		return err
 	}
+	// The last turn never closes: its picture is taken here, so that the history
+	// shows how the match ended whenever that happened.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO "TurnSnapshot" ("matchId", turn, ownership)
+		SELECT $1, $2, coalesce(jsonb_object_agg(tu."geoUnitId"::text, t."ownerEmpireId"), '{}'::jsonb)
+		FROM "Territory" t JOIN "TerritoryUnit" tu ON tu."territoryId" = t.id
+		WHERE t."matchId" = $1 AND t."ownerEmpireId" IS NOT NULL
+		ON CONFLICT DO NOTHING`, matchID, turn); err != nil {
+		return err
+	}
 	data := map[string]string{}
 	if winnerID != nil {
 		var name string
