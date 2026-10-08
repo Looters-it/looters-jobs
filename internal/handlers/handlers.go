@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 
+	"gioco/jobs/internal/battle"
 	"gioco/jobs/internal/battlequeue"
 	"gioco/jobs/internal/geoprocess"
 	"gioco/jobs/internal/matchstart"
@@ -86,12 +86,11 @@ func Ping(db queue.Querier) queue.Handler {
 	}
 }
 
-// ResolveBattle handles a request from the battle queue (Kafka).
-// The battle rules arrive with milestone 7: until then no battle can exist,
-// so a request is only logged.
-func ResolveBattle(log *slog.Logger) battlequeue.Resolver {
-	return func(_ context.Context, message battlequeue.Message) error {
-		log.Warn("battle resolution is not implemented yet", "battleId", message.BattleID, "matchId", message.MatchID)
-		return nil
+// ResolveBattle handles a request from the battle queue (Kafka): the defender
+// has answered, and the battle is resolved at once.
+func ResolveBattle(battles *battle.Service) battlequeue.Resolver {
+	return func(ctx context.Context, message battlequeue.Message) error {
+		_, err := battles.Resolve(ctx, message.BattleID, message.MatchID)
+		return err
 	}
 }

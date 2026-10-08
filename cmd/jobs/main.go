@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 
+	"gioco/jobs/internal/battle"
 	"gioco/jobs/internal/battlequeue"
 	"gioco/jobs/internal/config"
 	"gioco/jobs/internal/db"
@@ -49,12 +50,13 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	battles := battle.NewService(pool, log)
 	worker := &queue.Worker{
 		Store: queue.PgStore{Pool: pool},
 		Handlers: handlers.All(pool,
 			&geoprocess.Processor{Pool: pool, UploadDir: cfg.UploadDir, Geo: cfg.Geo, Log: log},
 			&matchstart.Starter{Pool: pool, Log: log},
-			&turnclose.Closer{Pool: pool, Log: log},
+			&turnclose.Closer{Pool: pool, Log: log, Battles: battles},
 		),
 		Workers:      cfg.Workers,
 		MaxAttempts:  cfg.MaxAttempts,
@@ -62,11 +64,11 @@ func run(log *slog.Logger) error {
 		StaleAfter:   cfg.StaleAfter,
 		Log:          log,
 	}
-	battles, err := battlequeue.New(battlequeue.Options{
+	battleConsumer, err := battlequeue.New(battlequeue.Options{
 		Brokers: cfg.KafkaBrokers,
 		Topic:   cfg.KafkaBattleTopic,
 		Group:   cfg.KafkaGroup,
-		Resolve: handlers.ResolveBattle(log),
+		Resolve: handlers.ResolveBattle(battles),
 		Log:     log,
 	})
 	if err != nil {
@@ -76,7 +78,7 @@ func run(log *slog.Logger) error {
 	log.Info("jobs started", "workers", cfg.Workers, "pollInterval", cfg.PollInterval.String(), "battleTopic", cfg.KafkaBattleTopic)
 	var wg sync.WaitGroup
 	wg.Go(func() { worker.Run(ctx) })
-	wg.Go(func() { battles.Run(ctx) })
+	wg.Go(func() { battleConsumer.Run(ctx) })
 	wg.Wait()
 	log.Info("jobs stopped")
 	return nil

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"gioco/jobs/internal/battle"
 	"gioco/jobs/internal/queue"
 	"gioco/jobs/internal/rules"
 )
@@ -30,6 +31,8 @@ type Closer struct {
 	Pool *pgxpool.Pool
 	Log  *slog.Logger
 	Now  func() time.Time
+	// Battles resolves what is still open when the turn ends.
+	Battles *battle.Service
 }
 
 func (c *Closer) now() time.Time {
@@ -100,6 +103,17 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 		return "", err
 	}
 
+	// Battles the defender did not answer are fought now, as a voluntary defence; a
+	// battle whose answer never reached the queue is resolved with that answer.
+	// A territory conquered here is protected through the turn that is about to
+	// begin: protection until the end of the turn that just ended would protect nothing.
+	if c.Battles != nil {
+		if _, err := c.Battles.ResolveOpenInTx(ctx, tx, matchID, turn+1); err != nil {
+			return "", fmt.Errorf("battles: %w", err)
+		}
+	}
+
+	// Income comes after the battles, so it goes to whoever holds each territory now.
 	if err := creditIncome(ctx, tx, matchID, matchRules); err != nil {
 		return "", fmt.Errorf("income: %w", err)
 	}
