@@ -13,6 +13,10 @@ import (
 type MatchRules struct {
 	MinPlayersToStart int  `json:"minPlayersToStart"`
 	LateJoin          bool `json:"lateJoin"`
+	// Bots are played by the api: jobs only carries their settings along.
+	BotsEnabled       bool    `json:"botsEnabled"`
+	BotsMax           int     `json:"botsMax"`
+	BotSpawnChancePct float64 `json:"botSpawnChancePct"`
 
 	StartResources int     `json:"startResources"`
 	HiddenMin      int     `json:"hiddenMin"`

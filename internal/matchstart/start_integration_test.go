@@ -134,6 +134,14 @@ func TestStartsAnOpenMatchAtItsTime(t *testing.T) {
 	}
 }
 
+func TestOnePlayerIsEnoughToStart(t *testing.T) {
+	f := setup(t)
+	f.match("OPEN", 1)
+	if got := f.start(); got != matchstart.Started {
+		t.Fatalf("outcome = %s, want started", got)
+	}
+}
+
 func TestDoesNotStartWhatIsNotDue(t *testing.T) {
 	cases := map[string]struct {
 		status  string
@@ -144,13 +152,15 @@ func TestDoesNotStartWhatIsNotDue(t *testing.T) {
 		"draft":             {"DRAFT", 2, false, matchstart.NotOpen},
 		"already running":   {"RUNNING", 2, false, matchstart.NotOpen},
 		"start moved later": {"OPEN", 2, true, matchstart.Rescheduled},
-		"one player":        {"OPEN", 1, false, matchstart.TooFewPlayers},
 		"nobody":            {"OPEN", 0, false, matchstart.TooFewPlayers},
+		// One player is enough by default; a match can still ask for more.
+		"fewer than the match asks for": {"OPEN", 1, false, matchstart.TooFewPlayers},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := setup(t)
 			f.match(tc.status, tc.players)
+			f.exec(`UPDATE "Match" SET config = jsonb_set(config, '{minPlayersToStart}', '2')`)
 			if tc.early {
 				f.now = f.now.Add(-time.Hour) // the job fires an hour before the new start
 			}

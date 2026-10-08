@@ -1,6 +1,9 @@
 {
-  "minPlayersToStart": 2,
+  "minPlayersToStart": 1,
   "lateJoin": true,
+  "botsEnabled": false,
+  "botsMax": 5,
+  "botSpawnChancePct": 30,
   "startResources": 200,
   "hiddenMin": 10,
   "hiddenMax": 100,
