@@ -484,3 +484,67 @@ func TestTheLastEmpireStandingWins(t *testing.T) {
 		t.Error("a battle was resolved after the match ended")
 	}
 }
+
+// build stores an active structure with the given effects, as the api would.
+func (f *fixture) build(id, empire, territory string, effects string) {
+	f.t.Helper()
+	f.exec(`INSERT INTO "Structure" (id, "matchId", "territoryId", "empireId", type, "builtTurn", data)
+		VALUES ($1, 'm1', $2, $3, 'ANY_NAME', 1, jsonb_build_object('effects', jsonb_build_array($4::text)))`,
+		id, territory, empire, effects)
+}
+
+func TestASecondCapitalSavesTheEmpireOnce(t *testing.T) {
+	f := setup(t)
+	f.exec(`DELETE FROM "Battle"`)
+	f.exec(`UPDATE "Territory" SET resources = 100 WHERE id = 'A1'`)
+	// The type is unknown to jobs on purpose: only the effect counts.
+	f.build("backup", "bruno", "B2", "BACKUP_CAPITAL")
+	f.declare("capital", "B1", 200, 300, map[string][2]int{"A1": {100, 200}})
+	f.answer("capital", "SURRENDER")
+	f.resolve("capital")
+
+	// Bruno lost the municipality and nothing else: B2 is his capital now.
+	f.expect("B1", "anna", 300)
+	f.expect("B2", "bruno", 80)
+	var status string
+	var capital string
+	f.scan(`SELECT status::text, "capitalTerritoryId" FROM "Empire" WHERE id = 'bruno'`, &status, &capital)
+	if status != "ACTIVE" || capital != "B2" {
+		t.Fatalf("Bruno is %s with capital %s", status, capital)
+	}
+	// The reserve is used up: to have another he must buy it again.
+	if got := f.count(`SELECT count(*) FROM "Structure" WHERE active`); got != 0 {
+		t.Errorf("%d structures still active", got)
+	}
+	if got := f.count(`SELECT count(*) FROM "GameEvent" WHERE type = 'CAPITAL_PROMOTED'`); got != 1 {
+		t.Errorf("%d promotion events", got)
+	}
+
+	// Without a reserve, losing the new capital is the end.
+	f.exec(`UPDATE "Territory" SET resources = 100, "protectedUntilTurn" = NULL WHERE id = 'A1'`)
+	f.declare("again", "B2", 200, 80, map[string][2]int{"A1": {100, 200}})
+	f.answer("again", "SURRENDER")
+	f.resolve("again")
+	f.scan(`SELECT status::text FROM "Empire" WHERE id = 'bruno'`, &status)
+	if status != "FALLEN" {
+		t.Errorf("Bruno is %s after losing his only capital", status)
+	}
+}
+
+func TestConqueringTheSecondCapitalOnlyTakesThatTerritory(t *testing.T) {
+	f := setup(t)
+	f.build("backup", "bruno", "B2", "BACKUP_CAPITAL")
+	f.answer("b1", "SURRENDER") // b1 targets B2
+	f.resolve("b1")
+
+	f.expect("B2", "anna", 80)
+	var status, capital string
+	f.scan(`SELECT status::text, "capitalTerritoryId" FROM "Empire" WHERE id = 'bruno'`, &status, &capital)
+	if status != "ACTIVE" || capital != "B1" {
+		t.Errorf("Bruno is %s with capital %s", status, capital)
+	}
+	// The structure is lost with the territory, and does not pass to the conqueror.
+	if got := f.count(`SELECT count(*) FROM "Structure" WHERE active`); got != 0 {
+		t.Errorf("%d structures still active", got)
+	}
+}

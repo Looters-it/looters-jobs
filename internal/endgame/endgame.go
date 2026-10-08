@@ -49,6 +49,29 @@ func CapitalLost(ctx context.Context, tx pgx.Tx, matchID, loserID, conquerorID, 
 		return false, nil
 	}
 
+	// A structure with the BACKUP_CAPITAL effect (the second capital) on a territory
+	// the empire still holds saves it: that territory becomes the capital, the
+	// structure is used up, and only the conquered municipality is lost.
+	var backupStructure, backupTerritory, backupName string
+	err = tx.QueryRow(ctx, `
+		SELECT s.id, t.id, t.name FROM "Structure" s JOIN "Territory" t ON t.id = s."territoryId"
+		WHERE s."empireId" = $1 AND s.active AND s.data->'effects' ? 'BACKUP_CAPITAL'
+			AND t."ownerEmpireId" = $1
+		ORDER BY s."builtTurn", s.id LIMIT 1`, loserID).Scan(&backupStructure, &backupTerritory, &backupName)
+	if err == nil {
+		if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE id = $1`, backupStructure); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE "Empire" SET "capitalTerritoryId" = $2 WHERE id = $1`, loserID, backupTerritory); err != nil {
+			return false, err
+		}
+		return false, event(ctx, tx, matchID, turn, "CAPITAL_PROMOTED", &loserID,
+			map[string]string{"empireName": loserName, "territoryName": backupName})
+	}
+	if err != pgx.ErrNoRows {
+		return false, err
+	}
+
 	const openBattlesOfLoser = `
 		SELECT id FROM "Battle"
 		WHERE "matchId" = $1 AND status = 'OPEN' AND ("attackerEmpireId" = $2 OR "defenderEmpireId" = $2)`
@@ -69,6 +92,10 @@ func CapitalLost(ctx context.Context, tx pgx.Tx, matchID, loserID, conquerorID, 
 		return false, err
 	}
 
+	// Nothing the empire built outlives it.
+	if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE "empireId" = $1 AND active`, loserID); err != nil {
+		return false, err
+	}
 	// The rest of the empire becomes no man's land, resources included.
 	if _, err := tx.Exec(ctx, `
 		UPDATE "Territory" SET "ownerEmpireId" = NULL, "protectedUntilTurn" = NULL, weight = 1,
@@ -201,5 +228,15 @@ func UpdateAccumulationAlerts(ctx context.Context, tx pgx.Tx, matchID string, pc
 			AND (t.alert IS DISTINCT FROM (now_above.above AND t."aboveAlertAtLastClose")
 				OR t."aboveAlertAtLastClose" IS DISTINCT FROM now_above.above)`,
 		matchID, pct, minTerritories)
+	return err
+}
+
+// ExpireStructures ends the structures whose last turn is the one closing.
+// It reads only what every structure has, so a new kind of structure needs
+// nothing here.
+func ExpireStructures(ctx context.Context, tx pgx.Tx, matchID string, turn int) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE "Structure" SET active = false
+		WHERE "matchId" = $1 AND active AND "expiresTurn" IS NOT NULL AND "expiresTurn" <= $2`, matchID, turn)
 	return err
 }

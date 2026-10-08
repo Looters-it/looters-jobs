@@ -324,3 +324,27 @@ func TestAccumulationAlert(t *testing.T) {
 		t.Errorf("%d alerts left after going back under the threshold", got)
 	}
 }
+
+func TestStructuresExpireAtTheCloseOfTheirLastTurn(t *testing.T) {
+	f := setup(t)
+	insert := func(id string, expires any) {
+		f.exec(`INSERT INTO "Structure" (id, "matchId", "territoryId", "empireId", type, "builtTurn", "expiresTurn")
+			VALUES ($1, 'm1', 'A1', 'anna', 'A_NEW_KIND', 1, $2)`, id, expires)
+	}
+	insert("ends-now", 3)
+	insert("ends-later", 4)
+	insert("permanent", nil)
+
+	f.close(3)
+	active := func(id string) bool {
+		return f.count(`SELECT count(*) FROM "Structure" WHERE active AND id = '`+id+`'`) == 1
+	}
+	if active("ends-now") || !active("ends-later") || !active("permanent") {
+		t.Fatalf("after turn 3: ends-now=%v ends-later=%v permanent=%v", active("ends-now"), active("ends-later"), active("permanent"))
+	}
+	f.now = f.now.Add(12 * time.Hour)
+	f.close(4)
+	if active("ends-later") || !active("permanent") {
+		t.Fatalf("after turn 4: ends-later=%v permanent=%v", active("ends-later"), active("permanent"))
+	}
+}

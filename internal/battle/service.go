@@ -157,6 +157,13 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 		}
 	}
 
+	if attackerWins {
+		// What stood on a conquered territory is lost with it (a second capital, for one).
+		if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE "territoryId" = $1 AND active`, targetID); err != nil {
+			return false, err
+		}
+	}
+
 	// The territories involved are free again.
 	if _, err := tx.Exec(ctx, `DELETE FROM "BattleLock" WHERE "battleId" = $1`, battleID); err != nil {
 		return false, err
