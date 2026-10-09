@@ -51,7 +51,7 @@ func setup(t *testing.T) *fixture {
 	}
 	f.exec(`INSERT INTO "User" (id, username, email, "passwordHash") VALUES ('u1','anna','a@example.test','x'), ('u2','bruno','b@example.test','x'), ('u3','carla','c@example.test','x')`)
 	f.exec(`INSERT INTO "Match" (id, name, "ownerId", status, "startAt", "turnHours", "currentTurn", "turnEndsAt", config)
-		VALUES ('m1', 'Prova', 'u1', 'RUNNING', $1, 12, 3, $2, $3::jsonb)`, turnEnd.Add(-36*time.Hour), turnEnd, string(config))
+		VALUES ('m1', 'Prova', 'u1', 'ONGOING', $1, 12, 3, $2, $3::jsonb)`, turnEnd.Add(-36*time.Hour), turnEnd, string(config))
 
 	// Geography: five municipalities, needed because territories point to them.
 	f.exec(`INSERT INTO "GeoArea" (id, name) VALUES ('a1', 'Area')`)

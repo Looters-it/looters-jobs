@@ -1,5 +1,5 @@
-// Package matchstart moves a match from open registrations to running when
-// its start time comes.
+// Package matchstart moves a match from planned to ongoing when its start
+// time comes.
 package matchstart
 
 import (
@@ -21,11 +21,12 @@ type Outcome string
 
 const (
 	Started Outcome = "started"
-	// NotOpen: the match is a draft, already running, finished or deleted.
+	// NotOpen: the match is already ongoing, finished or deleted.
 	NotOpen Outcome = "not open"
 	// Rescheduled: the owner moved the start; another job will come at the new time.
 	Rescheduled Outcome = "rescheduled"
-	// TooFewPlayers: the match stays open until the owner sets a new date.
+	// TooFewPlayers: the match stays planned; it starts when enough players have
+	// joined (the api schedules the start again) or at a new date set by the owner.
 	TooFewPlayers Outcome = "too few players"
 )
 
@@ -62,7 +63,7 @@ func (s *Starter) Start(ctx context.Context, matchID string) (Outcome, error) {
 	err = tx.QueryRow(ctx,
 		`SELECT status::text, "startAt", "turnHours", config FROM "Match" WHERE id = $1 FOR UPDATE`, matchID,
 	).Scan(&status, &startAt, &turnHours, &config)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "OPEN") {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "PLANNED") {
 		return NotOpen, nil
 	}
 	if err != nil {
@@ -93,7 +94,7 @@ func (s *Starter) Start(ctx context.Context, matchID string) (Outcome, error) {
 	// so they close at the hour the owner chose.
 	turnEndsAt := startAt.Add(time.Duration(turnHours * float64(time.Hour)))
 	if _, err := tx.Exec(ctx,
-		`UPDATE "Match" SET status = 'RUNNING', "currentTurn" = 1, "turnEndsAt" = $2 WHERE id = $1`,
+		`UPDATE "Match" SET status = 'ONGOING', "currentTurn" = 1, "turnEndsAt" = $2 WHERE id = $1`,
 		matchID, turnEndsAt); err != nil {
 		return "", err
 	}

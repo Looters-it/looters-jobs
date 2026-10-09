@@ -52,7 +52,7 @@ func (s *Service) Resolve(ctx context.Context, battleID, matchID string) (bool, 
 	var turn int
 	err = tx.QueryRow(ctx,
 		`SELECT status::text, "currentTurn" FROM "Match" WHERE id = $1 FOR SHARE`, matchID).Scan(&status, &turn)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "RUNNING") {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "ONGOING") {
 		return false, nil
 	}
 	if err != nil {

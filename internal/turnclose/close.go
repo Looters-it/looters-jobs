@@ -95,7 +95,7 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 	if err != nil {
 		return "", err
 	}
-	if status != "RUNNING" || current != turn || turnEndsAt == nil {
+	if status != "ONGOING" || current != turn || turnEndsAt == nil {
 		return Stale, nil
 	}
 	endsAt := asUTC(*turnEndsAt)

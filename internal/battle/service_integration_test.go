@@ -61,7 +61,7 @@ func setup(t *testing.T) *fixture {
 	}
 	f.exec(`INSERT INTO "User" (id, username, email, "passwordHash") VALUES ('u1','anna','a@example.test','x'), ('u2','bruno','b@example.test','x'), ('u3','carla','c@example.test','x')`)
 	f.exec(`INSERT INTO "Match" (id, name, "ownerId", status, "startAt", "turnHours", "currentTurn", "turnEndsAt", config)
-		VALUES ('m1', 'Prova', 'u1', 'RUNNING', $1, 12, 3, $2, $3::jsonb)`, turnEnd.Add(-36*time.Hour), turnEnd, string(config))
+		VALUES ('m1', 'Prova', 'u1', 'ONGOING', $1, 12, 3, $2, $3::jsonb)`, turnEnd.Add(-36*time.Hour), turnEnd, string(config))
 	f.exec(`INSERT INTO "Empire" (id, "matchId", "userId", name, color, emblem, "capitalTerritoryId") VALUES
 		('anna', 'm1', 'u1', 'Anna', '#111111', 'torre', 'A1'), ('bruno', 'm1', 'u2', 'Bruno', '#222222', 'luna', 'B1'),
 		('carla', 'm1', 'u3', 'Carla', '#333333', 'luna', 'C1')`)
@@ -438,7 +438,7 @@ func TestConqueringTheCapitalMakesTheEmpireFall(t *testing.T) {
 	}
 	// Two empires are still standing: the match goes on.
 	f.scan(`SELECT status::text FROM "Match" WHERE id = 'm1'`, &status)
-	if status != "RUNNING" {
+	if status != "ONGOING" {
 		t.Errorf("match is %s", status)
 	}
 }

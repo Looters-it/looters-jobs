@@ -99,7 +99,7 @@ func (f *fixture) count(query string) (n int) {
 
 func TestStartsAnOpenMatchAtItsTime(t *testing.T) {
 	f := setup(t)
-	f.match("OPEN", 2)
+	f.match("PLANNED", 2)
 	// The job runs a little late: turns are still counted from the scheduled start.
 	scheduled := f.now
 	f.now = f.now.Add(7 * time.Second)
@@ -108,7 +108,7 @@ func TestStartsAnOpenMatchAtItsTime(t *testing.T) {
 		t.Fatalf("outcome = %s", got)
 	}
 	status, turn, turnEndsAt := f.matchState()
-	if status != "RUNNING" || turn != 1 {
+	if status != "ONGOING" || turn != 1 {
 		t.Fatalf("status=%s turn=%d", status, turn)
 	}
 	if want := scheduled.Add(12 * time.Hour); turnEndsAt == nil || !turnEndsAt.Equal(time.Date(want.Year(), want.Month(), want.Day(), want.Hour(), 0, 0, 0, turnEndsAt.Location())) {
@@ -136,7 +136,7 @@ func TestStartsAnOpenMatchAtItsTime(t *testing.T) {
 
 func TestOnePlayerIsEnoughToStart(t *testing.T) {
 	f := setup(t)
-	f.match("OPEN", 1)
+	f.match("PLANNED", 1)
 	if got := f.start(); got != matchstart.Started {
 		t.Fatalf("outcome = %s, want started", got)
 	}
@@ -149,12 +149,11 @@ func TestDoesNotStartWhatIsNotDue(t *testing.T) {
 		early   bool
 		want    matchstart.Outcome
 	}{
-		"draft":             {"DRAFT", 2, false, matchstart.NotOpen},
-		"already running":   {"RUNNING", 2, false, matchstart.NotOpen},
-		"start moved later": {"OPEN", 2, true, matchstart.Rescheduled},
-		"nobody":            {"OPEN", 0, false, matchstart.TooFewPlayers},
+		"already running":   {"ONGOING", 2, false, matchstart.NotOpen},
+		"start moved later": {"PLANNED", 2, true, matchstart.Rescheduled},
+		"nobody":            {"PLANNED", 0, false, matchstart.TooFewPlayers},
 		// One player is enough by default; a match can still ask for more.
-		"fewer than the match asks for": {"OPEN", 1, false, matchstart.TooFewPlayers},
+		"fewer than the match asks for": {"PLANNED", 1, false, matchstart.TooFewPlayers},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

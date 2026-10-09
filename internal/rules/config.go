@@ -16,6 +16,7 @@ type MatchRules struct {
 	// Bots are played by the api: jobs only carries their settings along.
 	BotsEnabled       bool    `json:"botsEnabled"`
 	BotsMax           int     `json:"botsMax"`
+	BotsAtStart       int     `json:"botsAtStart"`
 	BotSpawnChancePct float64 `json:"botSpawnChancePct"`
 
 	StartResources int     `json:"startResources"`

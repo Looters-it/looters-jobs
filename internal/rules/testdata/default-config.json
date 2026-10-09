@@ -3,6 +3,7 @@
   "lateJoin": true,
   "botsEnabled": false,
   "botsMax": 5,
+  "botsAtStart": 0,
   "botSpawnChancePct": 30,
   "startResources": 200,
   "hiddenMin": 10,
