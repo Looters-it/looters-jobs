@@ -73,45 +73,7 @@ func CapitalLost(ctx context.Context, tx pgx.Tx, matchID, loserID, conquerorID, 
 		return false, err
 	}
 
-	const openBattlesOfLoser = `
-		SELECT id FROM "Battle"
-		WHERE "matchId" = $1 AND status = 'OPEN' AND ("attackerEmpireId" = $2 OR "defenderEmpireId" = $2)`
-	if _, err := tx.Exec(ctx, `
-		UPDATE "Territory" t SET resources = t.resources + src.cost
-		FROM "BattleSource" src WHERE t.id = src."territoryId" AND src."battleId" IN (`+openBattlesOfLoser+`)`,
-		matchID, loserID); err != nil {
-		return false, fmt.Errorf("refund cancelled battles: %w", err)
-	}
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM "BattleLock" WHERE "battleId" IN (`+openBattlesOfLoser+`)`, matchID, loserID); err != nil {
-		return false, err
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE "Battle" SET status = 'RESOLVED', outcome = 'CANCELLED', "resolvedAt" = `+utcNow+`
-		WHERE "matchId" = $1 AND status = 'OPEN' AND ("attackerEmpireId" = $2 OR "defenderEmpireId" = $2)`,
-		matchID, loserID); err != nil {
-		return false, err
-	}
-
-	// A fallen empire is in no alliance.
-	// A fallen empire has no allies: its pacts end with it.
-	if _, err := tx.Exec(ctx, `DELETE FROM "Alliance" WHERE "aEmpireId" = $1 OR "bEmpireId" = $1`, loserID); err != nil {
-		return false, err
-	}
-	// Nothing the empire built outlives it.
-	if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE "empireId" = $1 AND active`, loserID); err != nil {
-		return false, err
-	}
-	// The rest of the empire becomes no man's land, resources included.
-	if _, err := tx.Exec(ctx, `
-		UPDATE "Territory" SET "ownerEmpireId" = NULL, "protectedUntilTurn" = NULL, weight = 1,
-			alert = false, "aboveAlertAtLastClose" = false
-		WHERE "matchId" = $1 AND "ownerEmpireId" = $2`, matchID, loserID); err != nil {
-		return false, err
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE "Empire" SET status = 'FALLEN', "fallenTurn" = $2, "capitalTerritoryId" = NULL WHERE id = $1`,
-		loserID, turn); err != nil {
+	if err := dissolve(ctx, tx, matchID, loserID, turn); err != nil {
 		return false, err
 	}
 
@@ -124,6 +86,107 @@ func CapitalLost(ctx context.Context, tx pgx.Tx, matchID, loserID, conquerorID, 
 		return false, err
 	}
 	return finishIfOneLeft(ctx, tx, matchID, turn)
+}
+
+// dissolve is what happens to an empire that is no more, however it ended: the
+// battles it was part of are cancelled and refunded, its pacts and structures end,
+// every territory it still holds becomes free with its resources, and the empire
+// is marked fallen.
+func dissolve(ctx context.Context, tx pgx.Tx, matchID, loserID string, turn int) error {
+	const openBattlesOfLoser = `
+		SELECT id FROM "Battle"
+		WHERE "matchId" = $1 AND status = 'OPEN' AND ("attackerEmpireId" = $2 OR "defenderEmpireId" = $2)`
+	if _, err := tx.Exec(ctx, `
+		UPDATE "Territory" t SET resources = t.resources + src.cost
+		FROM "BattleSource" src WHERE t.id = src."territoryId" AND src."battleId" IN (`+openBattlesOfLoser+`)`,
+		matchID, loserID); err != nil {
+		return fmt.Errorf("refund cancelled battles: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM "BattleLock" WHERE "battleId" IN (`+openBattlesOfLoser+`)`, matchID, loserID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE "Battle" SET status = 'RESOLVED', outcome = 'CANCELLED', "resolvedAt" = `+utcNow+`
+		WHERE "matchId" = $1 AND status = 'OPEN' AND ("attackerEmpireId" = $2 OR "defenderEmpireId" = $2)`,
+		matchID, loserID); err != nil {
+		return err
+	}
+
+	// A fallen empire is in no alliance.
+	// A fallen empire has no allies: its pacts end with it.
+	if _, err := tx.Exec(ctx, `DELETE FROM "Alliance" WHERE "aEmpireId" = $1 OR "bEmpireId" = $1`, loserID); err != nil {
+		return err
+	}
+	// Nothing the empire built outlives it.
+	if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE "empireId" = $1 AND active`, loserID); err != nil {
+		return err
+	}
+	// The rest of the empire becomes no man's land, resources included.
+	if _, err := tx.Exec(ctx, `
+		UPDATE "Territory" SET "ownerEmpireId" = NULL, "protectedUntilTurn" = NULL, weight = 1,
+			alert = false, "aboveAlertAtLastClose" = false
+		WHERE "matchId" = $1 AND "ownerEmpireId" = $2`, matchID, loserID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE "Empire" SET status = 'FALLEN', "fallenTurn" = $2, "capitalTerritoryId" = NULL WHERE id = $1`,
+		loserID, turn); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Abandon takes out of a running match an empire whose player leaves it for good.
+// Everything it holds, the capital included, becomes free with its resources, and
+// the player stays as a spectator, as after a fall. The match ends if one empire is
+// left, or if no player is: bots do not play on among themselves. It does nothing
+// when the match is not running or the empire is not active any more, so the job
+// can be delivered twice. It reports whether the match ended.
+func Abandon(ctx context.Context, tx pgx.Tx, matchID, empireID string) (matchEnded bool, err error) {
+	// Held like a turn close: nothing else changes the match meanwhile.
+	var status string
+	var turn int
+	err = tx.QueryRow(ctx,
+		`SELECT status::text, "currentTurn" FROM "Match" WHERE id = $1 FOR UPDATE`, matchID).Scan(&status, &turn)
+	if err == pgx.ErrNoRows || (err == nil && status != "ONGOING") {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var name, empireStatus string
+	err = tx.QueryRow(ctx,
+		`SELECT name, status::text FROM "Empire" WHERE id = $1 AND "matchId" = $2 FOR UPDATE`, empireID, matchID).Scan(&name, &empireStatus)
+	if err == pgx.ErrNoRows || (err == nil && empireStatus != "ACTIVE") {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := dissolve(ctx, tx, matchID, empireID, turn); err != nil {
+		return false, err
+	}
+	if err := event(ctx, tx, matchID, turn, "EMPIRE_ABANDONED", &empireID, map[string]string{"empireName": name}); err != nil {
+		return false, err
+	}
+
+	var active, players int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE NOT u."isBot")
+		FROM "Empire" e JOIN "User" u ON u.id = e."userId"
+		WHERE e."matchId" = $1 AND e.status = 'ACTIVE'`, matchID).Scan(&active, &players); err != nil {
+		return false, err
+	}
+	if active > 1 && players > 0 {
+		return false, queue.Notify(ctx, tx, queue.Notification{MatchID: &matchID, Kind: "empire.abandoned"})
+	}
+	// One left wins; bots left alone are ranked as at the deadline; nobody left, nobody wins.
+	winners, err := WinnersAtDeadline(ctx, tx, matchID)
+	if err != nil {
+		return false, err
+	}
+	return true, Finish(ctx, tx, matchID, winners, turn)
 }
 
 // finishIfOneLeft ends the match when a single empire is still standing: it wins.

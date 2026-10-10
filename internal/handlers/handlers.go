@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+
 	"looters/jobs/internal/battle"
 	"looters/jobs/internal/battlequeue"
+	"looters/jobs/internal/endgame"
 	"looters/jobs/internal/geoprocess"
 	"looters/jobs/internal/matchstart"
 	"looters/jobs/internal/queue"
@@ -17,22 +20,52 @@ import (
 
 // Job types.
 const (
-	TypePing       = "system.ping"
-	TypeGeoProcess = "geo.process"
-	TypeMatchStart = "match.start"
-	TypeTurnClose  = "turn.close"
+	TypePing          = "system.ping"
+	TypeGeoProcess    = "geo.process"
+	TypeMatchStart    = "match.start"
+	TypeTurnClose     = "turn.close"
+	TypeEmpireAbandon = "empire.abandon"
 )
 
 // KindPong is the notification sent in reply to a ping.
 const KindPong = "system.pong"
 
 // All returns the handlers for every job type this service knows.
-func All(db queue.Querier, geo *geoprocess.Processor, starter *matchstart.Starter, closer *turnclose.Closer) map[string]queue.Handler {
+func All(db Database, geo *geoprocess.Processor, starter *matchstart.Starter, closer *turnclose.Closer) map[string]queue.Handler {
 	return map[string]queue.Handler{
-		TypePing:       Ping(db),
-		TypeGeoProcess: GeoProcess(geo),
-		TypeMatchStart: MatchStart(starter),
-		TypeTurnClose:  TurnClose(closer),
+		TypePing:          Ping(db),
+		TypeGeoProcess:    GeoProcess(geo),
+		TypeMatchStart:    MatchStart(starter),
+		TypeTurnClose:     TurnClose(closer),
+		TypeEmpireAbandon: EmpireAbandon(db),
+	}
+}
+
+// Database is what the handlers need of the pool: to notify, and to open a transaction.
+type Database interface {
+	queue.Querier
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// EmpireAbandon takes out of a running match the empire of a player who leaves it.
+func EmpireAbandon(db Database) queue.Handler {
+	return func(ctx context.Context, job queue.Job) error {
+		var payload struct {
+			MatchID  string `json:"matchId"`
+			EmpireID string `json:"empireId"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.MatchID == "" || payload.EmpireID == "" {
+			return fmt.Errorf("%w: invalid empire.abandon payload %s", queue.ErrPermanent, job.Payload)
+		}
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(context.WithoutCancel(ctx))
+		if _, err := endgame.Abandon(ctx, tx, payload.MatchID, payload.EmpireID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 }
 
