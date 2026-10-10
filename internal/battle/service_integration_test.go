@@ -187,12 +187,12 @@ func TestDefenceWonByTheAttacker(t *testing.T) {
 	f.answer("b1", "DEFEND")
 	f.resolve("b1")
 
-	// The defender paid half of what was on the territory; the rest goes to the winner,
-	// with 70% of what the two sides spent: 60 to attack and 40 to defend.
-	f.expect("B2", "anna", 110)
-	// Nothing comes back to the attacker: the cost of the attack is spent.
-	f.expect("A1", "anna", 50)
-	f.expect("A2", "anna", 10)
+	// The defender paid half of what was on the territory; the rest goes to the winner.
+	f.expect("B2", "anna", 40)
+	// 70% of what the two sides spent, 60 to attack and 40 to defend, goes back where
+	// the attack started from, in proportion to what each paid: 50 and 10 of 60.
+	f.expect("A1", "anna", 109)
+	f.expect("A2", "anna", 21)
 	f.expect("B1", "bruno", 300)
 
 	var outcome, resolver string
@@ -369,8 +369,11 @@ func TestManyBattlesResolvedAtTheSameTime(t *testing.T) {
 		t.Errorf("%d battles resolved", got)
 	}
 	// Every defender paid ceil(81 x 50%) = 41 exactly once, and the winner received 70% of
-	// the 50 + 41 spent, 63, exactly once: 103 wherever the territory is now.
-	if got := f.count(`SELECT count(*) FROM "Territory" WHERE id LIKE 'T%' AND resources <> 103`); got != 0 {
+	// the 50 + 41 spent, 63, exactly once: on the territory if it was defended, where the
+	// attack started from if it was conquered.
+	if got := f.count(`SELECT count(*) FROM "Territory" s JOIN "Territory" t ON t.id = 'T' || substr(s.id, 2)
+		WHERE s.id LIKE 'S%' AND NOT ((t."ownerEmpireId" = 'bruno' AND t.resources = 103 AND s.resources = 50)
+			OR (t."ownerEmpireId" = 'anna' AND t.resources = 40 AND s.resources = 113))`); got != 0 {
 		t.Errorf("%d attacked territories with a wrong balance", got)
 	}
 	if got := f.count(`SELECT count(*) FROM "BattleLock"`); got != 0 {

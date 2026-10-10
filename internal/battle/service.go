@@ -128,9 +128,8 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 	} else {
 		// Strength was fixed at the declaration, before any cost. Defending costs a share
 		// of what is on the attacked territory, whoever wins. Part of what the two sides
-		// spent then goes to the winner, on the territory fought over: the defender keeps
-		// it there, the attacker finds it on what was conquered. Paid and received in one
-		// write: a second one on the same row would check its owner again, and lock it.
+		// spent then goes to the winner: the defender receives it on the territory that
+		// was defended, the attacker on the territories the attack started from.
 		force := 0
 		if defenseForce != nil {
 			force = *defenseForce
@@ -139,16 +138,24 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 		defenseCost = &cost
 		won := int(math.Floor(float64(attackCost+cost) * matchRules.BattleSpoilsPct / 100))
 		spoils = &won
-		if _, err := tx.Exec(ctx,
-			`UPDATE "Territory" SET resources = GREATEST(resources - $2, 0) + $3 WHERE id = $1`, targetID, cost, won); err != nil {
-			return false, err
-		}
 		fought := s.Resolver.Resolve(attackForce, force, s.Roll)
 		result = &fought
 		attackerWins = fought.AttackerWins
 		outcome = OutcomeDefenderWon
+		kept := won
 		if attackerWins {
-			outcome = OutcomeAttackerWon
+			outcome, kept = OutcomeAttackerWon, 0
+		}
+		// Paid and received in one write: a second one on the same row would check its
+		// owner again, and lock it.
+		if _, err := tx.Exec(ctx,
+			`UPDATE "Territory" SET resources = GREATEST(resources - $2, 0) + $3 WHERE id = $1`, targetID, cost, kept); err != nil {
+			return false, err
+		}
+		if attackerWins {
+			if err := returnSpoils(ctx, tx, battleID, won); err != nil {
+				return false, err
+			}
 		}
 	}
 
@@ -242,6 +249,47 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 		}
 	}
 	return true, nil
+}
+
+// returnSpoils gives what an attack won to the territories it started from, each
+// in proportion to what it paid; what the rounding leaves goes to the ones that
+// paid the most, one each.
+func returnSpoils(ctx context.Context, tx pgx.Tx, battleID string, spoils int) error {
+	type source struct {
+		ID   string
+		Cost int
+	}
+	rows, err := tx.Query(ctx,
+		`SELECT "territoryId", cost FROM "BattleSource" WHERE "battleId" = $1 ORDER BY cost DESC, "territoryId"`, battleID)
+	if err != nil {
+		return err
+	}
+	sources, err := pgx.CollectRows(rows, pgx.RowToStructByPos[source])
+	if err != nil {
+		return err
+	}
+	total := 0
+	for _, src := range sources {
+		total += src.Cost
+	}
+	if total == 0 {
+		return nil
+	}
+	shares, given := make([]int, len(sources)), 0
+	for i, src := range sources {
+		shares[i] = spoils * src.Cost / total
+		given += shares[i]
+	}
+	for i := 0; given < spoils; i, given = (i+1)%len(shares), given+1 {
+		shares[i]++
+	}
+	for i, src := range sources {
+		if _, err := tx.Exec(ctx,
+			`UPDATE "Territory" SET resources = resources + $2 WHERE id = $1`, src.ID, shares[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ResolveOpenInTx resolves every battle of a match that is still open, in
