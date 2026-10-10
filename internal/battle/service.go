@@ -76,14 +76,14 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 	var (
 		status, matchID, attackerID, defenderID, targetID string
 		response                                          *string
-		attackForce                                       int
+		attackForce, attackCost                           int
 		defenseForce                                      *int
 	)
 	err := tx.QueryRow(ctx, `
 		SELECT status::text, response::text, "matchId", "attackerEmpireId", "defenderEmpireId",
-			"targetTerritoryId", "attackForce", "defenseForce"
+			"targetTerritoryId", "attackForce", "attackCost", "defenseForce"
 		FROM "Battle" WHERE id = $1 FOR UPDATE`, battleID,
-	).Scan(&status, &response, &matchID, &attackerID, &defenderID, &targetID, &attackForce, &defenseForce)
+	).Scan(&status, &response, &matchID, &attackerID, &defenderID, &targetID, &attackForce, &attackCost, &defenseForce)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -113,6 +113,7 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 		outcome      string
 		result       *Result
 		defenseCost  *int
+		spoils       *int
 		attackerWins bool
 	)
 	if answer == "SURRENDER" {
@@ -126,15 +127,20 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 		}
 	} else {
 		// Strength was fixed at the declaration, before any cost. Defending costs a share
-		// of what is on the attacked territory, whoever wins.
+		// of what is on the attacked territory, whoever wins. Part of what the two sides
+		// spent then goes to the winner, on the territory fought over: the defender keeps
+		// it there, the attacker finds it on what was conquered. Paid and received in one
+		// write: a second one on the same row would check its owner again, and lock it.
 		force := 0
 		if defenseForce != nil {
 			force = *defenseForce
 		}
 		cost := int(math.Ceil(float64(force) * matchRules.DefensePct / 100))
 		defenseCost = &cost
+		won := int(math.Floor(float64(attackCost+cost) * matchRules.BattleSpoilsPct / 100))
+		spoils = &won
 		if _, err := tx.Exec(ctx,
-			`UPDATE "Territory" SET resources = GREATEST(resources - $2, 0) WHERE id = $1`, targetID, cost); err != nil {
+			`UPDATE "Territory" SET resources = GREATEST(resources - $2, 0) + $3 WHERE id = $1`, targetID, cost, won); err != nil {
 			return false, err
 		}
 		fought := s.Resolver.Resolve(attackForce, force, s.Roll)
@@ -190,9 +196,9 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE "Battle" SET status = 'RESOLVED', outcome = $2::"BattleOutcome", resolver = $3,
-			"rollAttack" = $4, "rollDefense" = $5, "defenseCost" = $6,
+			"rollAttack" = $4, "rollDefense" = $5, "defenseCost" = $6, spoils = $7,
 			"resolvedAt" = (now() AT TIME ZONE 'UTC')
-		WHERE id = $1`, battleID, outcome, s.Resolver.Name(), rollAttack, rollDefense, defenseCost); err != nil {
+		WHERE id = $1`, battleID, outcome, s.Resolver.Name(), rollAttack, rollDefense, defenseCost, spoils); err != nil {
 		return false, err
 	}
 

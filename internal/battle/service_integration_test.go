@@ -187,8 +187,9 @@ func TestDefenceWonByTheAttacker(t *testing.T) {
 	f.answer("b1", "DEFEND")
 	f.resolve("b1")
 
-	// The defender paid half of what was on the territory; the rest goes to the winner.
-	f.expect("B2", "anna", 40)
+	// The defender paid half of what was on the territory; the rest goes to the winner,
+	// with 70% of what the two sides spent: 60 to attack and 40 to defend.
+	f.expect("B2", "anna", 110)
 	// Nothing comes back to the attacker: the cost of the attack is spent.
 	f.expect("A1", "anna", 50)
 	f.expect("A2", "anna", 10)
@@ -196,11 +197,11 @@ func TestDefenceWonByTheAttacker(t *testing.T) {
 
 	var outcome, resolver string
 	var rollAttack, rollDefense float64
-	var defenseCost int
-	f.scan(`SELECT outcome::text, resolver, "rollAttack", "rollDefense", "defenseCost" FROM "Battle" WHERE id = 'b1'`,
-		&outcome, &resolver, &rollAttack, &rollDefense, &defenseCost)
+	var defenseCost, spoils int
+	f.scan(`SELECT outcome::text, resolver, "rollAttack", "rollDefense", "defenseCost", spoils FROM "Battle" WHERE id = 'b1'`,
+		&outcome, &resolver, &rollAttack, &rollDefense, &defenseCost, &spoils)
 	// Resources, numbers drawn and outcome are all on record.
-	if outcome != battle.OutcomeAttackerWon || resolver != "uniform-product-v1" || rollAttack != 0.9 || rollDefense != 0.2 || defenseCost != 40 {
+	if outcome != battle.OutcomeAttackerWon || resolver != "uniform-product-v1" || rollAttack != 0.9 || rollDefense != 0.2 || defenseCost != 40 || spoils != 70 {
 		t.Errorf("battle: %s by %s, rolls %v/%v, defence cost %d", outcome, resolver, rollAttack, rollDefense, defenseCost)
 	}
 }
@@ -211,8 +212,9 @@ func TestDefenceWonByTheDefender(t *testing.T) {
 	f.answer("b1", "DEFEND")
 	f.resolve("b1")
 
-	// The territory stays, but defending still cost half of what was on it.
-	f.expect("B2", "bruno", 40)
+	// The territory stays. Defending cost half of what was on it, and winning pays 70%
+	// of what the two sides spent: the defender ends up with more than before.
+	f.expect("B2", "bruno", 110)
 	f.expect("A1", "anna", 50)
 	// Defended, it cannot be attacked again in the same turn.
 	if got := f.territory("B2").protected; got == nil {
@@ -366,8 +368,9 @@ func TestManyBattlesResolvedAtTheSameTime(t *testing.T) {
 	if got := f.count(`SELECT count(*) FROM "Battle" WHERE status = 'RESOLVED'`); got != n {
 		t.Errorf("%d battles resolved", got)
 	}
-	// Every defender paid ceil(81 x 50%) = 41 exactly once: 40 is left wherever the territory is now.
-	if got := f.count(`SELECT count(*) FROM "Territory" WHERE id LIKE 'T%' AND resources <> 40`); got != 0 {
+	// Every defender paid ceil(81 x 50%) = 41 exactly once, and the winner received 70% of
+	// the 50 + 41 spent, 63, exactly once: 103 wherever the territory is now.
+	if got := f.count(`SELECT count(*) FROM "Territory" WHERE id LIKE 'T%' AND resources <> 103`); got != 0 {
 		t.Errorf("%d attacked territories with a wrong balance", got)
 	}
 	if got := f.count(`SELECT count(*) FROM "BattleLock"`); got != 0 {

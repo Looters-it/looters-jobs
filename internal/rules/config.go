@@ -35,6 +35,7 @@ type MatchRules struct {
 	AttackMaxPct       float64 `json:"attackMaxPct"`
 	DefensePct         float64 `json:"defensePct"`
 	SurrenderRefundPct float64 `json:"surrenderRefundPct"`
+	BattleSpoilsPct    float64 `json:"battleSpoilsPct"`
 
 	CapitalMoveEveryTurns    int     `json:"capitalMoveEveryTurns"`
 	AccumAlertPct            float64 `json:"accumAlertPct"`
@@ -57,7 +58,8 @@ type MatchRules struct {
 // ParseMatchRules decodes Match.config. Unknown keys are an error: they mean
 // the api has a rule this service does not know about yet.
 func ParseMatchRules(raw []byte) (MatchRules, error) {
-	var rules MatchRules
+	// A match created before a rule existed plays by the default of that rule.
+	rules := MatchRules{BattleSpoilsPct: 70}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&rules); err != nil {
