@@ -214,8 +214,9 @@ func TestDefenceWonByTheDefender(t *testing.T) {
 	// The territory stays, but defending still cost half of what was on it.
 	f.expect("B2", "bruno", 40)
 	f.expect("A1", "anna", 50)
-	if got := f.territory("B2").protected; got != nil {
-		t.Errorf("a territory that did not change hands became protected until %d", *got)
+	// Defended, it cannot be attacked again in the same turn.
+	if got := f.territory("B2").protected; got == nil {
+		t.Error("a territory that was defended can be attacked again in the same turn")
 	}
 	var outcome string
 	f.scan(`SELECT outcome::text FROM "Battle" WHERE id = 'b1'`, &outcome)

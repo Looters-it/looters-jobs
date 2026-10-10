@@ -161,6 +161,18 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 		}
 	}
 
+	if !attackerWins {
+		// Attacked once, a territory is left alone until the turn of the attack ends:
+		// nobody can attack the same one twice in a turn, whoever they are. A battle
+		// fought while its turn closes leaves the territory open in the turn that begins.
+		if _, err := tx.Exec(ctx, `
+			UPDATE "Territory" t SET "protectedUntilTurn" = b.turn
+			FROM "Battle" b WHERE b.id = $2 AND t.id = $1
+				AND coalesce(t."protectedUntilTurn", 0) < b.turn`, targetID, battleID); err != nil {
+			return false, err
+		}
+	}
+
 	if attackerWins {
 		// What stood on a conquered territory is lost with it (a second capital, for one).
 		if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE "territoryId" = $1 AND active`, targetID); err != nil {
