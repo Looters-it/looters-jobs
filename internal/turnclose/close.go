@@ -83,12 +83,13 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 		maxDays    *int
 		current    int
 		turnEndsAt *time.Time
+		pausedAt   *time.Time
 		turnHours  float64
 		config     []byte
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT status::text, "startAt", "maxDays", "currentTurn", "turnEndsAt", "turnHours", config FROM "Match" WHERE id = $1 FOR UPDATE`, matchID,
-	).Scan(&status, &startAt, &maxDays, &current, &turnEndsAt, &turnHours, &config)
+		`SELECT status::text, "startAt", "maxDays", "currentTurn", "turnEndsAt", "pausedAt", "turnHours", config FROM "Match" WHERE id = $1 FOR UPDATE`, matchID,
+	).Scan(&status, &startAt, &maxDays, &current, &turnEndsAt, &pausedAt, &turnHours, &config)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Stale, nil
 	}
@@ -96,6 +97,10 @@ func (c *Closer) Close(ctx context.Context, matchID string, turn int) (Outcome, 
 		return "", err
 	}
 	if status != "ONGOING" || current != turn || turnEndsAt == nil {
+		return Stale, nil
+	}
+	// A paused match closes no turn: the api queues the closing again when it is resumed.
+	if pausedAt != nil {
 		return Stale, nil
 	}
 	endsAt := asUTC(*turnEndsAt)
