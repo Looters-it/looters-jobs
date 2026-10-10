@@ -30,6 +30,7 @@ type MatchRules struct {
 	AnnexCost    int `json:"annexCost"`
 	AnnexPerTurn int `json:"annexPerTurn"`
 
+	AttacksPerTurn     int     `json:"attacksPerTurn"`
 	AttackPct          float64 `json:"attackPct"`
 	AttackStepPct      float64 `json:"attackStepPct"`
 	AttackMaxPct       float64 `json:"attackMaxPct"`
@@ -59,7 +60,7 @@ type MatchRules struct {
 // the api has a rule this service does not know about yet.
 func ParseMatchRules(raw []byte) (MatchRules, error) {
 	// A match created before a rule existed plays by the default of that rule.
-	rules := MatchRules{BattleSpoilsPct: 70}
+	rules := MatchRules{BattleSpoilsPct: 70, AttacksPerTurn: 5}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&rules); err != nil {

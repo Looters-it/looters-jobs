@@ -73,7 +73,7 @@ func CapitalLost(ctx context.Context, tx pgx.Tx, matchID, loserID, conquerorID, 
 		return false, err
 	}
 
-	if err := dissolve(ctx, tx, matchID, loserID, turn); err != nil {
+	if err := dissolve(ctx, tx, matchID, loserID, turn, &conquerorID); err != nil {
 		return false, err
 	}
 
@@ -90,9 +90,9 @@ func CapitalLost(ctx context.Context, tx pgx.Tx, matchID, loserID, conquerorID, 
 
 // dissolve is what happens to an empire that is no more, however it ended: the
 // battles it was part of are cancelled and refunded, its pacts and structures end,
-// every territory it still holds becomes free with its resources, and the empire
-// is marked fallen.
-func dissolve(ctx context.Context, tx pgx.Tx, matchID, loserID string, turn int) error {
+// every territory it still holds goes with its resources to the heir, the empire that
+// conquered it, or becomes free when there is none, and the empire is marked fallen.
+func dissolve(ctx context.Context, tx pgx.Tx, matchID, loserID string, turn int, heirID *string) error {
 	const openBattlesOfLoser = `
 		SELECT id FROM "Battle"
 		WHERE "matchId" = $1 AND status = 'OPEN' AND ("attackerEmpireId" = $2 OR "defenderEmpireId" = $2)`
@@ -122,11 +122,23 @@ func dissolve(ctx context.Context, tx pgx.Tx, matchID, loserID string, turn int)
 	if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE "empireId" = $1 AND active`, loserID); err != nil {
 		return err
 	}
-	// The rest of the empire becomes no man's land, resources included.
-	if _, err := tx.Exec(ctx, `
+	if heirID != nil {
+		// Conquered with its capital: everything the empire still holds goes to who took
+		// it, resources included. Just acquired, it is protected until the turn ends and
+		// weighs in the income like the average of what the conqueror already has.
+		if _, err := tx.Exec(ctx, `
+			UPDATE "Territory" t SET "ownerEmpireId" = $3, "protectedUntilTurn" = $4,
+				weight = coalesce((SELECT greatest(1, round(avg(o.weight)))::int FROM "Territory" o
+					WHERE o."ownerEmpireId" = $3), 1),
+				alert = false, "aboveAlertAtLastClose" = false
+			WHERE t."matchId" = $1 AND t."ownerEmpireId" = $2`, matchID, loserID, *heirID, turn); err != nil {
+			return err
+		}
+	} else if _, err := tx.Exec(ctx, `
 		UPDATE "Territory" SET "ownerEmpireId" = NULL, "protectedUntilTurn" = NULL, weight = 1,
 			alert = false, "aboveAlertAtLastClose" = false
 		WHERE "matchId" = $1 AND "ownerEmpireId" = $2`, matchID, loserID); err != nil {
+		// Left by its player: the rest of the empire becomes no man's land, resources included.
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -164,7 +176,7 @@ func Abandon(ctx context.Context, tx pgx.Tx, matchID, empireID string) (matchEnd
 	if err != nil {
 		return false, err
 	}
-	if err := dissolve(ctx, tx, matchID, empireID, turn); err != nil {
+	if err := dissolve(ctx, tx, matchID, empireID, turn, nil); err != nil {
 		return false, err
 	}
 	if err := event(ctx, tx, matchID, turn, "EMPIRE_ABANDONED", &empireID, map[string]string{"empireName": name}); err != nil {

@@ -412,16 +412,16 @@ func TestConqueringTheCapitalMakesTheEmpireFall(t *testing.T) {
 		t.Fatal("not resolved")
 	}
 
-	// The conqueror gets the capital only, with its resources.
+	// The conqueror gets the capital with its resources, and with it everything else
+	// Bruno had, which keeps what was on it: the cost of the cancelled attack is back
+	// on B2. Just acquired, it is protected until the turn ends.
 	f.expect("B1", "anna", 300)
-	// Everything else Bruno had is no man's land and keeps what was on it: the cost of
-	// the cancelled attack is back on B2, and B3 is no longer protected.
-	f.expect("B2", "", 40)
-	f.expect("B3", "", 55)
-	if got := f.territory("B3").protected; got != nil {
-		t.Errorf("a freed territory is still protected until %d", *got)
+	f.expect("B2", "anna", 40)
+	f.expect("B3", "anna", 55)
+	if got := f.territory("B3").protected; got == nil || *got != 3 {
+		t.Errorf("an inherited territory is protected until %v, want turn 3", got)
 	}
-	// Carla's attack on a territory that is now free is cancelled too, and refunded.
+	// Carla's attack on a territory that changed hands is cancelled too, and refunded.
 	f.expect("C2", "carla", 40)
 	f.expect("C1", "carla", 70)
 
