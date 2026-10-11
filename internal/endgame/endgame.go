@@ -278,6 +278,9 @@ func Finish(ctx context.Context, tx pgx.Tx, matchID string, winnerIDs []string, 
 		matchID, winnerID, winnerIDs); err != nil {
 		return err
 	}
+	if err := award(ctx, tx, matchID, winnerIDs, turn); err != nil {
+		return err
+	}
 	// The last turn never closes: its picture is taken here, so that the history
 	// shows how the match ended whenever that happened.
 	if _, err := tx.Exec(ctx, `
@@ -308,6 +311,46 @@ func Finish(ctx context.Context, tx pgx.Tx, matchID string, winnerIDs []string, 
 		return err
 	}
 	return queue.Notify(ctx, tx, queue.Notification{MatchID: &matchID, Kind: "match.finished"})
+}
+
+// AwardTurnsPerPoint is how many turns of a match add one point to what each place is worth.
+const AwardTurnsPerPoint = 5
+
+// award leaves to every empire of a finished match its place and its prize, and adds
+// the prize to the global ranking of who played it.
+//
+// The winners are first, together when they are more than one. Then come the empires
+// still standing, by resources and by municipalities controlled, then the fallen ones,
+// the last to fall before the first. Each place is worth a whole number of points that
+// grows from the last to the first: the last takes one share, the one before two, and
+// so on. A share is worth more the more empires were in the match and the longer it
+// lasted: one point for each empire, and one for every AwardTurnsPerPoint turns.
+// Bots take a place like everyone, but gather nothing.
+func award(ctx context.Context, tx pgx.Tx, matchID string, winnerIDs []string, turn int) error {
+	_, err := tx.Exec(ctx, `
+		WITH standing AS (
+			SELECT e.id, e.status, e."fallenTurn", e."joinedAt", e.id = ANY($2) AS won,
+				coalesce((SELECT sum(t.resources) FROM "Territory" t WHERE t."ownerEmpireId" = e.id), 0) AS resources,
+				(SELECT count(*) FROM "Territory" t JOIN "TerritoryUnit" tu ON tu."territoryId" = t.id
+					WHERE t."ownerEmpireId" = e.id) AS units
+			FROM "Empire" e WHERE e."matchId" = $1
+		), placed AS (
+			SELECT id, count(*) OVER () AS empires,
+				CASE WHEN won THEN 1 ELSE row_number() OVER (ORDER BY won DESC, (status = 'ACTIVE') DESC,
+					CASE WHEN status = 'ACTIVE' THEN resources END DESC NULLS LAST,
+					CASE WHEN status = 'ACTIVE' THEN units END DESC NULLS LAST,
+					"fallenTurn" DESC NULLS LAST, "joinedAt", id) END AS place
+			FROM standing
+		), scored AS (
+			UPDATE "Empire" e SET place = p.place, award = (p.empires - p.place + 1) * (p.empires + $3::int / $4::int)
+			FROM placed p WHERE e.id = p.id AND e.award IS NULL
+			RETURNING e."userId", e.award, coalesce(e."fallenTurn", $3::int) AS turns
+		)
+		UPDATE "User" u SET elo = u.elo + s.award, "ratedMatches" = u."ratedMatches" + 1,
+			"ratedTurns" = u."ratedTurns" + s.turns
+		FROM scored s WHERE u.id = s."userId" AND NOT u."isBot"`,
+		matchID, winnerIDs, turn, AwardTurnsPerPoint)
+	return err
 }
 
 // UpdateAccumulationAlerts marks the territories that hold more than pct% of
