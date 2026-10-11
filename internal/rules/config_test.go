@@ -19,7 +19,7 @@ func TestParseDefaultConfigFromAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rules.StartResources != 200 || rules.IncomeBase != 50 || rules.IncomePerUnit != 10 ||
-		rules.AttackPct != 50 || rules.DefensePct != 50 || rules.MergeCostTurns != 0.5 || rules.BlockCost != 300 {
+		rules.AttackPct != 50 || rules.DefensePct != 50 || rules.MergeCostTurns != 0.5 || rules.BlockCost != 150 {
 		t.Fatalf("unexpected defaults: %+v", rules)
 	}
 
