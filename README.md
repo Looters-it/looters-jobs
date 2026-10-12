@@ -1,16 +1,16 @@
 # looters-jobs
 
-I lavori in background, in Go: elaborazione dei confini dei comuni, avvio delle partite, chiusura dei turni e risoluzione degli scontri (letti da una coda Kafka).
+The background work, in Go: processing the boundaries of the municipalities, starting matches, closing turns and resolving battles (read from a Kafka queue).
 
-Fa parte di [Looters](https://github.com/Looters-it/looters), un gioco di conquista multigiocatore sui comuni italiani. Questo repository non si usa da solo: va clonato dentro il repository radice, che contiene `docker-compose.yml`, documentazione e istruzioni.
+It is part of [Looters](https://github.com/Looters-it/looters), an online multiplayer conquest game played on real municipalities. This repository is not used on its own: it is cloned inside the root repository, which holds `docker-compose.yml`, the documentation and the instructions.
 
 ```sh
 git clone https://github.com/Looters-it/looters.git && cd looters
 git clone https://github.com/Looters-it/looters-jobs.git jobs
 ```
 
-- Avvio, test e comandi: [README del repository radice](https://github.com/Looters-it/looters#readme)
-- Contratto tra i servizi: [`docs/ARCHITECTURE.md`](https://github.com/Looters-it/looters/blob/main/docs/ARCHITECTURE.md)
-- Regole del gioco: [`docs/SPEC.md`](https://github.com/Looters-it/looters/blob/main/docs/SPEC.md)
+- Running, testing and commands: [README of the root repository](https://github.com/Looters-it/looters#readme)
+- Contract between the services: [`docs/ARCHITECTURE.md`](https://github.com/Looters-it/looters/blob/main/docs/ARCHITECTURE.md)
+- Rules of the game: [`docs/SPEC.md`](https://github.com/Looters-it/looters/blob/main/docs/SPEC.md)
 
-Controlli in locale: `go vet ./... && go test -p 1 ./...`.
+Local checks: `go vet ./... && go test -p 1 ./...`.
