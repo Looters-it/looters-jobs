@@ -55,6 +55,7 @@ type MatchRules struct {
 	PortCost               int     `json:"portCost"`
 	PortFoundIslandPct     int     `json:"portFoundIslandPct"`
 	PortFoundCoastPct      int     `json:"portFoundCoastPct"`
+	PortRangeKm            int     `json:"portRangeKm"`
 
 	AllianceMaxAllies        int `json:"allianceMaxAllies"`
 	AllianceLeaveNoticeTurns int `json:"allianceLeaveNoticeTurns"`

@@ -35,6 +35,7 @@
   "portCost": 100,
   "portFoundIslandPct": 50,
   "portFoundCoastPct": 20,
+  "portRangeKm": 200,
   "allianceMaxAllies": 2,
   "allianceLeaveNoticeTurns": 1,
   "boardMaxChars": 500,
