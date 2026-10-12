@@ -520,6 +520,7 @@ func TestAPortStaysWithTheTerritoryItStandsOn(t *testing.T) {
 	f.exec(`UPDATE "Territory" SET resources = 100 WHERE id = 'A1'`)
 	// On Bruno's second territory: a port, and a block that does not stop this attack.
 	f.build("port", "bruno", "B2", "SEA_REACH")
+	f.build("airport", "bruno", "B2", "AIR_REACH")
 	f.build("other", "bruno", "B2", "SOMETHING_ELSE")
 	f.declare("harbour", "B2", 200, 300, map[string][2]int{"A1": {100, 200}})
 	f.answer("harbour", "SURRENDER")
@@ -531,6 +532,10 @@ func TestAPortStaysWithTheTerritoryItStandsOn(t *testing.T) {
 	f.scan(`SELECT "empireId", active FROM "Structure" WHERE id = 'port'`, &owner, &active)
 	if owner != "anna" || !active {
 		t.Fatalf("the port is of %s, active %v", owner, active)
+	}
+	// So is an airport.
+	if got := f.count(`SELECT count(*) FROM "Structure" WHERE id = 'airport' AND active AND "empireId" = 'anna'`); got != 1 {
+		t.Error("the airport did not pass to who conquered the territory")
 	}
 	if got := f.count(`SELECT count(*) FROM "Structure" WHERE id = 'other' AND active`); got != 0 {
 		t.Error("the other structure survived the conquest")
