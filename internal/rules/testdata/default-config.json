@@ -21,6 +21,8 @@
   "defensePct": 50,
   "surrenderRefundPct": 50,
   "battleSpoilsPct": 70,
+  "siegeMarginPct": 30,
+  "siegeCapitalMarginPct": 60,
   "capitalMoveEveryTurns": 3,
   "accumAlertPct": 50,
   "accumAlertMinTerritories": 3,

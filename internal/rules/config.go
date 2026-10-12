@@ -37,6 +37,10 @@ type MatchRules struct {
 	DefensePct         float64 `json:"defensePct"`
 	SurrenderRefundPct float64 `json:"surrenderRefundPct"`
 	BattleSpoilsPct    float64 `json:"battleSpoilsPct"`
+	// By how much a side must beat the other for a round to end a battle; below it the
+	// battle stays open as a siege. The second is for an attack on a capital.
+	SiegeMarginPct        float64 `json:"siegeMarginPct"`
+	SiegeCapitalMarginPct float64 `json:"siegeCapitalMarginPct"`
 
 	CapitalMoveEveryTurns    int     `json:"capitalMoveEveryTurns"`
 	AccumAlertPct            float64 `json:"accumAlertPct"`

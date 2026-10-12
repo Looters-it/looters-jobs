@@ -100,3 +100,31 @@ func TestOutcomesMatchTheExpectedProbabilities(t *testing.T) {
 		}
 	}
 }
+
+// A side wins a round only by the margin asked; below it nobody does.
+func TestDecideAsksForAMargin(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		attack, defense       int
+		rAttack, rDef, margin float64
+		decided, attackerWins bool
+		share                 float64
+	}{
+		{"clear win", 100, 100, 0.9, 0.3, 30, true, true, 0.75},
+		{"ahead by too little", 100, 100, 0.6, 0.5, 30, false, false, 0.6 / 1.1},
+		{"behind by too little", 100, 100, 0.5, 0.6, 30, false, false, 0.5 / 1.1},
+		{"clear defence", 100, 100, 0.3, 0.9, 30, true, false, 0.25},
+		{"no margin, ahead", 100, 100, 0.6, 0.5, 0, true, true, 0.6 / 1.1},
+		{"no margin, tie to the defender", 100, 100, 0.5, 0.5, 0, true, false, 0.5},
+		{"nothing against nothing", 0, 0, 0.5, 0.5, 30, true, false, 0},
+		{"nothing to attack with", 0, 50, 0.9, 0.1, 30, true, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := Result{RollAttack: tc.rAttack, RollDefense: tc.rDef}
+			decided, wins, share := Decide(tc.attack, tc.defense, result, tc.margin)
+			if decided != tc.decided || wins != tc.attackerWins || math.Abs(share-tc.share) > 1e-9 {
+				t.Errorf("decided %v, attacker wins %v, share %v", decided, wins, share)
+			}
+		})
+	}
+}

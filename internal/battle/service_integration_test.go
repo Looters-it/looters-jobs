@@ -2,6 +2,7 @@ package battle_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -244,8 +245,15 @@ func TestTheEventNamesTheSidesAndNeverAnAmount(t *testing.T) {
 			t.Errorf("event data %s lacks %s", data, want)
 		}
 	}
-	if strings.ContainsAny(data, "0123456789") {
-		t.Errorf("event data contains a number: %s", data)
+	// By how much it went and in how many rounds are told; forces, costs and rolls are not.
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(data), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range fields {
+		if _, number := value.(float64); number && key != "share" && key != "rounds" {
+			t.Errorf("event data tells an amount in %s: %s", key, data)
+		}
 	}
 	if empire != "anna" || target != "B2" {
 		t.Errorf("event about %s on %s", empire, target)
@@ -334,6 +342,8 @@ func TestManyBattlesResolvedAtTheSameTime(t *testing.T) {
 	f := setup(t)
 	f.exec(`DELETE FROM "Battle"`)
 	f.exec(`DELETE FROM "Territory" WHERE id LIKE 'A%' OR id = 'B2'`)
+	// Every battle ends in its round: what is checked here is that nothing is applied twice.
+	f.exec(`UPDATE "Match" SET config = config || '{"siegeMarginPct": 0}'::jsonb`)
 	const n = 30
 	for i := range n {
 		source, target, id := fmt.Sprintf("S%02d", i), fmt.Sprintf("T%02d", i), fmt.Sprintf("x%02d", i)
@@ -599,5 +609,132 @@ func TestTheAlliancesOfAFallenEmpireEndWithIt(t *testing.T) {
 	f.scan(`SELECT string_agg(id, ',') FROM "Alliance"`, &left)
 	if left != "al2" {
 		t.Errorf("alliances left: %q, want al2", left)
+	}
+}
+
+// A round nobody wins clearly leaves the battle open: both paid, the territories stay
+// locked, and the next round is fought in a later turn with what is there then.
+func TestARoundNobodyWinsClearlyOpensASiege(t *testing.T) {
+	f := setup(t)
+	// 120 x 0.5 = 60 against 80 x 0.7 = 56: ahead, by less than the 30% needed.
+	f.rolls = []float64{0.5, 0.7}
+	f.answer("b1", "DEFEND")
+	if !f.resolve("b1") {
+		t.Fatal("round not fought")
+	}
+	var status, result string
+	var round, fought int
+	var response *string
+	f.scan(`SELECT status::text, round, "foughtTurn", response::text FROM "Battle" WHERE id = 'b1'`, &status, &round, &fought, &response)
+	if status != "OPEN" || round != 2 || fought != 3 || response != nil {
+		t.Fatalf("battle %s at round %d, fought in turn %d, answer %v", status, round, fought, response)
+	}
+	f.scan(`SELECT result FROM "BattleRound" WHERE "battleId" = 'b1' AND round = 1`, &result)
+	if result != "DRAW" {
+		t.Errorf("round 1 = %s", result)
+	}
+	// The defender paid ceil(80 x 50%) = 40 and keeps the territory; nothing is unlocked.
+	if got := f.territory("B2"); got.owner != "bruno" || got.resources != 40 {
+		t.Errorf("B2 = %+v", got)
+	}
+	if got := f.count(`SELECT count(*) FROM "BattleLock"`); got != 3 {
+		t.Errorf("%d territories locked, want 3", got)
+	}
+	if got := f.count(`SELECT count(*) FROM "GameEvent" WHERE type = 'BATTLE_ROUND'`); got != 1 {
+		t.Errorf("%d round events", got)
+	}
+
+	// One round a turn: a second answer in the same turn waits.
+	f.answer("b1", "DEFEND")
+	if f.resolve("b1") {
+		t.Fatal("a second round was fought in the same turn")
+	}
+
+	// The next turn: Anna fights with the 50 + 10 left and pays 60% of them again, 30 + 6;
+	// Bruno with the 40 left, paying 20. 60 x 0.9 = 54 against 40 x 0.2 = 8: conquered.
+	f.exec(`UPDATE "Match" SET "currentTurn" = 4`)
+	f.rolls = []float64{0.9, 0.2}
+	if !f.resolve("b1") {
+		t.Fatal("second round not fought")
+	}
+	var outcome string
+	var attackCost, defenseCost, spoils int
+	f.scan(`SELECT outcome::text, "attackCost", "defenseCost", spoils FROM "Battle" WHERE id = 'b1'`, &outcome, &attackCost, &defenseCost, &spoils)
+	// 70% of everything spent in the two rounds: 60 + 36 + 40 + 20 = 156.
+	if outcome != battle.OutcomeAttackerWon || attackCost != 96 || defenseCost != 60 || spoils != 109 {
+		t.Errorf("outcome %s, attack cost %d, defense cost %d, spoils %d", outcome, attackCost, defenseCost, spoils)
+	}
+	if got := f.territory("B2"); got.owner != "anna" || got.resources != 20 {
+		t.Errorf("B2 = %+v", got)
+	}
+	a1, a2 := f.territory("A1"), f.territory("A2")
+	if a1.resources+a2.resources != 50-30+10-6+109 {
+		t.Errorf("A1 %d + A2 %d", a1.resources, a2.resources)
+	}
+	if got := f.count(`SELECT count(*) FROM "BattleLock"`); got != 0 {
+		t.Errorf("%d territories still locked", got)
+	}
+}
+
+// A siege lasts as long as the two sides keep it: no round is the last one.
+func TestASiegeHasNoLastRound(t *testing.T) {
+	f := setup(t)
+	f.rolls = []float64{0.5, 0.5}
+	for turn := 3; turn < 9; turn++ {
+		f.exec(`UPDATE "Match" SET "currentTurn" = $1`, turn)
+		// Kept even: the same on both sides before every round.
+		f.exec(`UPDATE "Territory" SET resources = 60 WHERE id IN ('A1', 'B2')`)
+		f.exec(`UPDATE "Territory" SET resources = 0 WHERE id = 'A2'`)
+		f.exec(`UPDATE "Battle" SET "attackForce" = 60, "defenseForce" = 60 WHERE round = 1`)
+		f.answer("b1", "DEFEND")
+		if !f.resolve("b1") {
+			t.Fatalf("turn %d: round not fought", turn)
+		}
+	}
+	if got := f.count(`SELECT round FROM "Battle" WHERE id = 'b1' AND status = 'OPEN'`); got != 7 {
+		t.Errorf("round = %d, want 7", got)
+	}
+}
+
+// The attacker can give a siege up: the defender keeps the territory and is paid.
+func TestTheAttackerWithdrawsFromASiege(t *testing.T) {
+	f := setup(t)
+	f.rolls = []float64{0.5, 0.7}
+	f.answer("b1", "DEFEND")
+	f.resolve("b1")
+	f.exec(`UPDATE "Battle" SET withdrawn = true WHERE id = 'b1'`)
+	// At once, in the turn of the round just fought.
+	if !f.resolve("b1") {
+		t.Fatal("withdrawal not applied")
+	}
+	var outcome string
+	f.scan(`SELECT outcome::text FROM "Battle" WHERE id = 'b1' AND status = 'RESOLVED'`, &outcome)
+	if outcome != battle.OutcomeWithdrawn {
+		t.Errorf("outcome = %s", outcome)
+	}
+	// 40 left after the round, plus 70% of the 60 + 40 spent.
+	if got := f.territory("B2"); got.owner != "bruno" || got.resources != 110 {
+		t.Errorf("B2 = %+v", got)
+	}
+	if got := f.count(`SELECT count(*) FROM "BattleLock"`); got != 0 {
+		t.Errorf("%d territories still locked", got)
+	}
+}
+
+// A capital asks for a wider margin: what takes a territory at once besieges a capital.
+func TestACapitalIsHarderToTakeInOneRound(t *testing.T) {
+	f := setup(t)
+	f.exec(`DELETE FROM "Battle"`)
+	f.declare("c1", "B1", 600, 300, map[string][2]int{"A1": {50, 100}})
+	// 600 x 0.5 = 300 against 300 x 0.7 = 210: 43% ahead, enough for a territory (30%)
+	// and not for a capital (60%).
+	f.rolls = []float64{0.5, 0.7}
+	f.answer("c1", "DEFEND")
+	f.resolve("c1")
+	if got := f.count(`SELECT count(*) FROM "Battle" WHERE id = 'c1' AND status = 'OPEN' AND round = 2`); got != 1 {
+		t.Error("the capital fell in one round")
+	}
+	if got := f.territory("B1"); got.owner != "bruno" {
+		t.Errorf("B1 = %+v", got)
 	}
 }

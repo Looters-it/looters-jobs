@@ -66,3 +66,25 @@ func WinProbability(attackForce, defenseForce float64) float64 {
 		return 1 - defenseForce/(2*attackForce)
 	}
 }
+
+// Decide reads a round fought by ProductResolver against a margin: a side wins the
+// battle only if its score beats the other's by that much. Below the margin nobody
+// wins and the battle goes on. Share is the attacker's part of the two scores: by how
+// much the round went, without any amount. At margin zero it decides like the
+// resolver: every round has a winner, and a tie goes to the defender.
+func Decide(attackForce, defenseForce int, result Result, marginPct float64) (decided, attackerWins bool, share float64) {
+	attack := float64(attackForce) * result.RollAttack
+	defense := float64(defenseForce) * result.RollDefense
+	if attack+defense > 0 {
+		share = attack / (attack + defense)
+	}
+	factor := 1 + marginPct/100
+	switch {
+	case attack > defense*factor:
+		return true, true, share
+	case defense >= attack*factor:
+		return true, false, share
+	default:
+		return false, false, share
+	}
+}
