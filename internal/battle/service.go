@@ -188,7 +188,15 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 
 	if attackerWins {
 		// What stood on a conquered territory is lost with it (a second capital, for one).
-		if _, err := tx.Exec(ctx, `UPDATE "Structure" SET active = false WHERE "territoryId" = $1 AND active`, targetID); err != nil {
+		// A port is not: it is part of the place, and serves whoever holds it.
+		if _, err := tx.Exec(ctx, `
+			UPDATE "Structure" SET active = false
+			WHERE "territoryId" = $1 AND active AND NOT jsonb_exists(data->'effects', 'SEA_REACH')`, targetID); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE "Structure" SET "empireId" = $2
+			WHERE "territoryId" = $1 AND active AND jsonb_exists(data->'effects', 'SEA_REACH')`, targetID, attackerID); err != nil {
 			return false, err
 		}
 	}

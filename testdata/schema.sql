@@ -703,3 +703,41 @@ UPDATE "Match" SET "inviteCode" = NULL;
 -- 20261009171000_drop_invite_code
 -- Private matches are entered by invitation: the code is gone.
 ALTER TABLE "Match" DROP COLUMN "inviteCode";
+
+-- 20261010090000_battle_spoils
+-- What the winner of a fought battle received.
+ALTER TABLE "Battle" ADD COLUMN "spoils" INTEGER;
+
+-- 20261010100000_match_pause
+-- A single-player match can be paused: the clock of the turn stands still.
+ALTER TABLE "Match" ADD COLUMN "pausedAt" TIMESTAMP(3);
+
+-- 20261011090000_elo
+-- What a finished match leaves to who played it, and what each player has gathered.
+ALTER TABLE "Empire" ADD COLUMN "place" INTEGER, ADD COLUMN "award" INTEGER;
+ALTER TABLE "User" ADD COLUMN "elo" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "ratedMatches" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "ratedTurns" INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX "User_elo_idx" ON "User"("elo" DESC);
+
+-- 20261012090000_area_outline
+-- The outline of a folder's own municipalities, as GeoJSON, and what it was drawn from.
+ALTER TABLE "GeoArea" ADD COLUMN "outline" TEXT;
+ALTER TABLE "GeoArea" ADD COLUMN "outlineOf" TEXT;
+
+-- 20261012150000_unit_isolation
+-- Why a municipality has no border with the rest of its country: it is an island, or
+-- an exclave lying in another country. Null for every municipality that has borders.
+CREATE TYPE "GeoIsolation" AS ENUM ('ISLAND', 'EXCLAVE');
+ALTER TABLE "GeoUnit" ADD COLUMN "isolation" "GeoIsolation";
+
+-- 20261012170000_coast
+-- The coastline of the world, in pieces: what tells a municipality on the sea from one inland.
+CREATE TABLE "GeoCoast" (
+  "id" SERIAL PRIMARY KEY,
+  "geom" geometry(LineString, 4326) NOT NULL
+);
+CREATE INDEX "GeoCoast_geom_idx" ON "GeoCoast" USING GIST ("geom");
+
+-- Whether a municipality has access to the sea: an island, or land the coast runs along.
+ALTER TABLE "GeoUnit" ADD COLUMN "coastal" BOOLEAN NOT NULL DEFAULT false;

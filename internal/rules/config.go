@@ -48,6 +48,9 @@ type MatchRules struct {
 	BlockCost              int     `json:"blockCost"`
 	BlockTurns             int     `json:"blockTurns"`
 	BlockCooldownTurns     int     `json:"blockCooldownTurns"`
+	PortCost               int     `json:"portCost"`
+	PortFoundIslandPct     int     `json:"portFoundIslandPct"`
+	PortFoundCoastPct      int     `json:"portFoundCoastPct"`
 
 	AllianceMaxAllies        int `json:"allianceMaxAllies"`
 	AllianceLeaveNoticeTurns int `json:"allianceLeaveNoticeTurns"`

@@ -504,6 +504,29 @@ func (f *fixture) build(id, empire, territory string, effects string) {
 		id, territory, empire, effects)
 }
 
+func TestAPortStaysWithTheTerritoryItStandsOn(t *testing.T) {
+	f := setup(t)
+	f.exec(`DELETE FROM "Battle"`)
+	f.exec(`UPDATE "Territory" SET resources = 100 WHERE id = 'A1'`)
+	// On Bruno's second territory: a port, and a block that does not stop this attack.
+	f.build("port", "bruno", "B2", "SEA_REACH")
+	f.build("other", "bruno", "B2", "SOMETHING_ELSE")
+	f.declare("harbour", "B2", 200, 300, map[string][2]int{"A1": {100, 200}})
+	f.answer("harbour", "SURRENDER")
+	f.resolve("harbour")
+
+	// The port is Anna's now, with the territory; what else stood there is lost.
+	var owner string
+	var active bool
+	f.scan(`SELECT "empireId", active FROM "Structure" WHERE id = 'port'`, &owner, &active)
+	if owner != "anna" || !active {
+		t.Fatalf("the port is of %s, active %v", owner, active)
+	}
+	if got := f.count(`SELECT count(*) FROM "Structure" WHERE id = 'other' AND active`); got != 0 {
+		t.Error("the other structure survived the conquest")
+	}
+}
+
 func TestASecondCapitalSavesTheEmpireOnce(t *testing.T) {
 	f := setup(t)
 	f.exec(`DELETE FROM "Battle"`)
