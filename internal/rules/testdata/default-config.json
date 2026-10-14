@@ -20,6 +20,8 @@
   "attackMaxPct": 100,
   "defensePct": 50,
   "surrenderRefundPct": 50,
+  "retreatPct": 100,
+  "garrisonPerUnit": 10,
   "battleSpoilsPct": 70,
   "siegeMarginPct": 30,
   "siegeCapitalMarginPct": 60,

@@ -160,8 +160,10 @@ func TestSurrender(t *testing.T) {
 		t.Fatal("not resolved")
 	}
 
-	// The territory passes to the attacker with everything on it: no defence was paid.
-	f.expect("B2", "anna", 80)
+	// The territory passes to the attacker empty: what was on it is taken away to the
+	// territory of the defender bordering it. No defence was paid.
+	f.expect("B2", "anna", 0)
+	f.expect("B1", "bruno", 380)
 	// Half of the cost comes back to each territory that paid it: 25 of 50, 5 of 10.
 	f.expect("A1", "anna", 75)
 	f.expect("A2", "anna", 15)
@@ -228,6 +230,36 @@ func TestDefenceWonByTheDefender(t *testing.T) {
 	}
 	if got := f.count(`SELECT count(*) FROM "BattleLock"`); got != 0 {
 		t.Errorf("%d territories still locked", got)
+	}
+}
+
+func TestARetreatCanLeaveSomethingBehind(t *testing.T) {
+	f := setup(t)
+	f.exec(`UPDATE "Match" SET config = config || '{"retreatPct": 25}'::jsonb`)
+	f.answer("b1", "SURRENDER")
+	f.resolve("b1")
+	// A quarter of the 80 goes with Bruno, the rest stays for Anna.
+	f.expect("B2", "anna", 60)
+	f.expect("B1", "bruno", 320)
+}
+
+func TestAnEmptyTerritoryIsDefendedByItsGarrison(t *testing.T) {
+	f := setup(t)
+	f.exec(`UPDATE "Territory" SET resources = 0 WHERE id = 'B2'`)
+	f.exec(`UPDATE "Battle" SET "defenseForce" = 0 WHERE id = 'b1'`)
+	// A territory is one municipality at least: here it is drawn without any.
+	units := 1
+	f.rolls = []float64{0.01, 0.9} // 120 x 0.01 = 1.2 against the garrison x 0.9
+	f.answer("b1", "DEFEND")
+	f.resolve("b1")
+
+	// Nothing on it, nothing paid, and still it holds.
+	// The spoils are 70% of the 60 the attack cost.
+	f.expect("B2", "bruno", 42)
+	var force, cost int
+	f.scan(`SELECT "defenseForce", "defenseCost" FROM "BattleRound" WHERE "battleId" = 'b1'`, &force, &cost)
+	if force != units*10 || cost != 0 {
+		t.Errorf("round fought with %d at a cost of %d, want %d for nothing", force, cost, units*10)
 	}
 }
 
@@ -469,7 +501,8 @@ func TestLosingAnotherTerritoryDoesNotMakeAnEmpireFall(t *testing.T) {
 	if status != "ACTIVE" {
 		t.Errorf("Bruno is %s", status)
 	}
-	f.expect("B1", "bruno", 300)
+	// With what B2 had, taken away in the retreat.
+	f.expect("B1", "bruno", 380)
 }
 
 func TestTheLastEmpireStandingWins(t *testing.T) {
@@ -586,7 +619,7 @@ func TestConqueringTheSecondCapitalOnlyTakesThatTerritory(t *testing.T) {
 	f.answer("b1", "SURRENDER") // b1 targets B2
 	f.resolve("b1")
 
-	f.expect("B2", "anna", 80)
+	f.expect("B2", "anna", 0)
 	var status, capital string
 	f.scan(`SELECT status::text, "capitalTerritoryId" FROM "Empire" WHERE id = 'bruno'`, &status, &capital)
 	if status != "ACTIVE" || capital != "B1" {

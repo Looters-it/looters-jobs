@@ -36,7 +36,11 @@ type MatchRules struct {
 	AttackMaxPct       float64 `json:"attackMaxPct"`
 	DefensePct         float64 `json:"defensePct"`
 	SurrenderRefundPct float64 `json:"surrenderRefundPct"`
-	BattleSpoilsPct    float64 `json:"battleSpoilsPct"`
+	// What of a territory given up its owner takes away, and what each municipality
+	// adds to a defence for free.
+	RetreatPct      float64 `json:"retreatPct"`
+	GarrisonPerUnit int     `json:"garrisonPerUnit"`
+	BattleSpoilsPct float64 `json:"battleSpoilsPct"`
 	// By how much a side must beat the other for a round to end a battle; below it the
 	// battle stays open as a siege. The second is for an attack on a capital.
 	SiegeMarginPct        float64 `json:"siegeMarginPct"`
@@ -76,7 +80,7 @@ type MatchRules struct {
 // the api has a rule this service does not know about yet.
 func ParseMatchRules(raw []byte) (MatchRules, error) {
 	// A match created before a rule existed plays by the default of that rule.
-	rules := MatchRules{BattleSpoilsPct: 70, AttacksPerTurn: 5}
+	rules := MatchRules{BattleSpoilsPct: 70, AttacksPerTurn: 5, RetreatPct: 100, GarrisonPerUnit: 10}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&rules); err != nil {

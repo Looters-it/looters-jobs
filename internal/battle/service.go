@@ -141,8 +141,11 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 	)
 	switch answer {
 	case "SURRENDER":
-		// The territory is given up with what is on it.
+		// The territory is given up, but its owner takes away what is on it, or part of it.
 		outcome, attackerWins = OutcomeSurrender, true
+		if err := retreat(ctx, tx, matchID, defenderID, targetID, matchRules.RetreatPct); err != nil {
+			return false, err
+		}
 		if round == 1 {
 			// Nothing was fought: the attacker gets back part of the cost.
 			if _, err := tx.Exec(ctx, `
@@ -193,6 +196,13 @@ func (s *Service) ResolveInTx(ctx context.Context, tx pgx.Tx, battleID string, s
 		cost := int(math.Ceil(float64(force) * matchRules.DefensePct / 100))
 		spent += cost
 		defenseCost = &spent
+		// Every municipality of the territory fights too, for nothing: the garrison.
+		var units int
+		if err := tx.QueryRow(ctx,
+			`SELECT greatest(count(*), 1) FROM "TerritoryUnit" WHERE "territoryId" = $1`, targetID).Scan(&units); err != nil {
+			return false, err
+		}
+		force += units * matchRules.GarrisonPerUnit
 		fought := s.Resolver.Resolve(attackForce, force, s.Roll)
 		result = &fought
 
@@ -421,6 +431,55 @@ func payRound(ctx context.Context, tx pgx.Tx, battleID string, pct int) (paid, s
 		}
 	}
 	return paid, strength, nil
+}
+
+// retreat takes what is on a territory given up, or the share of it the rules say,
+// to a territory of the same owner bordering it (one not in a battle first), or else
+// to the owner's capital. With neither, it stays where it is and goes with the territory.
+func retreat(ctx context.Context, tx pgx.Tx, matchID, ownerID, fromID string, pct float64) error {
+	if pct <= 0 {
+		return nil
+	}
+	var toID string
+	err := tx.QueryRow(ctx, `
+		WITH here AS (SELECT "geoUnitId" AS unit FROM "TerritoryUnit" WHERE "territoryId" = $3),
+		near AS (
+			SELECT a."bId" AS unit FROM "GeoAdjacency" a WHERE a."aId" IN (SELECT unit FROM here)
+			UNION SELECT a."aId" FROM "GeoAdjacency" a WHERE a."bId" IN (SELECT unit FROM here)
+		)
+		SELECT t.id FROM "Territory" t
+		WHERE t."matchId" = $1 AND t."ownerEmpireId" = $2 AND t.id <> $3
+			AND (EXISTS (SELECT 1 FROM "TerritoryUnit" tu JOIN near ON near.unit = tu."geoUnitId"
+					WHERE tu."territoryId" = t.id)
+				OR t.id = (SELECT "capitalTerritoryId" FROM "Empire" WHERE id = $2))
+		ORDER BY
+			EXISTS (SELECT 1 FROM "TerritoryUnit" tu JOIN near ON near.unit = tu."geoUnitId"
+				WHERE tu."territoryId" = t.id) DESC,
+			EXISTS (SELECT 1 FROM "BattleLock" l WHERE l."territoryId" = t.id),
+			t.resources DESC, t.id
+		LIMIT 1`, matchID, ownerID, fromID).Scan(&toID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var held int
+	if err := tx.QueryRow(ctx,
+		`SELECT resources FROM "Territory" WHERE id = $1 FOR UPDATE`, fromID).Scan(&held); err != nil {
+		return err
+	}
+	moved := int(math.Floor(float64(held) * pct / 100))
+	if moved <= 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE "Territory" SET resources = resources - $2 WHERE id = $1`, fromID, moved); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx,
+		`UPDATE "Territory" SET resources = resources + $2 WHERE id = $1`, toID, moved)
+	return err
 }
 
 // returnSpoils gives what an attack won to the territories it started from, each
